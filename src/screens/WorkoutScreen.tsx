@@ -188,68 +188,121 @@ function ExerciseCard({
   onSkip: (id: string, skipped: boolean) => void
   skipped: boolean
 }) {
+  const workingSets = sets.filter(s => s.set_type !== 'warmup')
+  const allDone = workingSets.length > 0 && workingSets.every(s => s.completed)
+  const completedCount = workingSets.filter(s => s.completed).length
+
+  const [collapsed, setCollapsed] = useState(false)
+
+  // Auto-collapse when all working sets are marked done
+  useEffect(() => {
+    if (allDone) setCollapsed(true)
+  }, [allDone])
+
+  const topSet = sets.find(s => s.set_type === 'top')
+  const workingSet = sets.find(s => s.set_type === 'working')
+  const displayWeight = (topSet ?? workingSet)?.actual_weight ?? (topSet ?? workingSet)?.target_weight
+
   return (
     <div className={`bg-surface/80 border rounded-2xl overflow-hidden transition-opacity ${
-      skipped ? 'opacity-40 border-edge' : 'border-edge shadow-card'
+      skipped ? 'opacity-40 border-edge' : allDone ? 'border-positive/30' : 'border-edge shadow-card'
     }`}>
-      {/* Card header */}
-      <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
+      {/* Card header — always visible, tap to collapse/expand */}
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full px-4 pt-4 pb-3 flex items-center gap-3 text-left active:opacity-70"
+      >
+        {/* Done indicator */}
+        <div className={`w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center transition-colors ${
+          allDone ? 'bg-positive border-positive' : skipped ? 'border-edge' : 'border-edge-strong'
+        }`}>
+          {(allDone || skipped) && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          )}
+        </div>
+
         <div className="flex-1 min-w-0">
-          <h3 className="font-bold text-ink text-base leading-tight">{exercise.name}</h3>
-          <div className="flex items-center gap-2 mt-1">
-            {exercise.rpe_target && (
-              <span className="text-xs text-ink-secondary">RPE {exercise.rpe_target}</span>
-            )}
-            {exercise.notes && (
-              <span className="text-xs text-ink-disabled truncate">{exercise.notes}</span>
-            )}
-          </div>
+          <h3 className={`font-bold text-base leading-tight ${allDone ? 'text-ink-secondary' : 'text-ink'}`}>
+            {exercise.name}
+          </h3>
+          {collapsed ? (
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-ink-disabled">
+                {skipped ? 'Skipped' : `${completedCount}/${workingSets.length} sets`}
+                {displayWeight != null && !skipped ? ` · ${displayWeight} lbs` : ''}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 mt-0.5">
+              {exercise.rpe_target && (
+                <span className="text-xs text-ink-secondary">RPE {exercise.rpe_target}</span>
+              )}
+              {exercise.notes && (
+                <span className="text-xs text-ink-disabled truncate">{exercise.notes}</span>
+              )}
+            </div>
+          )}
         </div>
-        {exercise.is_optional && (
-          <button
-            onClick={() => onSkip(exercise.id, !skipped)}
-            className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
-              skipped
-                ? 'border-edge text-ink-disabled bg-transparent'
-                : 'border-caution/40 text-caution bg-caution/10'
-            }`}
+
+        <div className="flex items-center gap-2 shrink-0">
+          {exercise.is_optional && !collapsed && (
+            <span
+              onClick={e => { e.stopPropagation(); onSkip(exercise.id, !skipped) }}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                skipped
+                  ? 'border-edge text-ink-disabled bg-transparent'
+                  : 'border-caution/40 text-caution bg-caution/10'
+              }`}
+            >
+              {skipped ? 'Skipped' : 'Skip'}
+            </span>
+          )}
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            className={`text-ink-disabled transition-transform ${collapsed ? '' : 'rotate-180'}`}
           >
-            {skipped ? 'Skipped' : 'Skip'}
-          </button>
-        )}
-      </div>
-
-      {/* Column headers */}
-      {!skipped && sets.length > 0 && (
-        <div className="flex items-center gap-2 px-3 pb-1">
-          <div className="w-12 shrink-0 text-center">
-            <span className="text-xs text-ink-disabled">Type</span>
-          </div>
-          <div className="flex-1 text-center">
-            <span className="text-xs text-ink-disabled">Weight</span>
-          </div>
-          <div className="flex-1 text-center">
-            <span className="text-xs text-ink-disabled">Reps</span>
-          </div>
-          <div className="w-8 shrink-0" />
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
         </div>
-      )}
+      </button>
 
-      {/* Set rows */}
-      {!skipped && (
-        <div className="px-1 pb-3 flex flex-col gap-0.5">
-          {sets.map(log => (
-            <SetRow
-              key={log.id}
-              log={log}
-              prevLog={prevSets.find(p => p.set_index === log.set_index && p.set_type === log.set_type) ?? null}
-              weightStep={exercise.rounding_increment}
-              onWeightChange={onWeightChange}
-              onRepsChange={onRepsChange}
-              onToggleComplete={onToggleComplete}
-            />
-          ))}
-        </div>
+      {/* Expandable content */}
+      {!collapsed && !skipped && (
+        <>
+          {/* Column headers */}
+          {sets.length > 0 && (
+            <div className="flex items-center gap-2 px-3 pb-1">
+              <div className="w-12 shrink-0 text-center">
+                <span className="text-xs text-ink-disabled">Type</span>
+              </div>
+              <div className="flex-1 text-center">
+                <span className="text-xs text-ink-disabled">Weight</span>
+              </div>
+              <div className="flex-1 text-center">
+                <span className="text-xs text-ink-disabled">Reps</span>
+              </div>
+              <div className="w-8 shrink-0" />
+            </div>
+          )}
+
+          {/* Set rows */}
+          <div className="px-1 pb-3 flex flex-col gap-0.5">
+            {sets.map(log => (
+              <SetRow
+                key={log.id}
+                log={log}
+                prevLog={prevSets.find(p => p.set_index === log.set_index && p.set_type === log.set_type) ?? null}
+                weightStep={exercise.rounding_increment}
+                onWeightChange={onWeightChange}
+                onRepsChange={onRepsChange}
+                onToggleComplete={onToggleComplete}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
