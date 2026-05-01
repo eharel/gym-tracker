@@ -138,9 +138,9 @@ export default function RestTimer() {
           </button>
         )}
 
-        {/* Main FAB — tap to start (idle) or restart (running) */}
+        {/* Main FAB — tap to start (idle) or open picker (running) */}
         <button
-          onClick={() => start()}
+          onClick={isRunning ? () => setShowPicker(p => !p) : () => start()}
           className={`flex items-center justify-center rounded-full font-bold shadow-elevated transition-all active:scale-95
             ${done
               ? 'w-14 h-14 bg-positive text-gray-900'
@@ -152,7 +152,7 @@ export default function RestTimer() {
                    }`
                 : 'w-12 h-12 bg-surface/90 backdrop-blur border border-edge text-ink-secondary'
             }`}
-          aria-label={isRunning ? 'Restart timer' : 'Start rest timer'}
+          aria-label={isRunning ? 'Change duration' : 'Start rest timer'}
         >
           {done ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
