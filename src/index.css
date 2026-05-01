@@ -59,16 +59,16 @@
     background-color: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    /* Prevents iOS Safari from zooming the viewport when an
-       input receives focus. Must be set at the root level.        */
     font-size: 16px;
-    /* Removes the grey tap flash on interactive elements
-       in mobile Safari.                                           */
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* Belt-and-suspenders: ensure all form controls stay at 16px
-     so iOS never has a reason to zoom.                           */
+  body {
+    min-height: 100vh;
+    /* Subtle radial glow at the top — gives depth on both mobile and desktop */
+    background: radial-gradient(ellipse 120% 50% at 50% 0%, #1a1a35 0%, var(--color-canvas) 65%);
+  }
+
   input,
   select,
   textarea {
