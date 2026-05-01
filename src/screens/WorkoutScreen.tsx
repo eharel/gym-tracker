@@ -11,6 +11,7 @@ import {
 } from '../lib/db'
 import { calcBackoffWeight, calcWarmupWeight, calcDumbbellWarmup, initializeSession } from '../lib/calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
+import RestTimer from '../components/RestTimer'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -492,6 +493,7 @@ export default function WorkoutScreen() {
 
   return (
     <div className="min-h-screen">
+      <RestTimer />
       <div className="max-w-md mx-auto px-4 py-8 flex flex-col gap-4">
 
         {/* Header */}
