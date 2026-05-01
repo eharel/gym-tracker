@@ -19,6 +19,7 @@ interface WorkoutData {
   template: WorkoutTemplate
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
+  lastSetLogs: SetLog[]  // previous session's logs for delta comparison
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -26,6 +27,18 @@ interface WorkoutData {
 function formatWeight(w: number | null): string {
   if (w === null) return ''
   return w === 0 ? '0' : String(w)
+}
+
+function DeltaBadge({ current, previous }: { current: number | null; previous: number | null }) {
+  if (current === null || previous === null) return null
+  const delta = current - previous
+  if (delta === 0) return null
+  const positive = delta > 0
+  return (
+    <span className={`text-xs font-bold tabular-nums ${positive ? 'text-positive' : 'text-negative'}`}>
+      {positive ? '+' : ''}{delta}
+    </span>
+  )
 }
 
 function setTypeLabel(type: SetLog['set_type']): { text: string; className: string } {
@@ -42,11 +55,15 @@ function setTypeLabel(type: SetLog['set_type']): { text: string; className: stri
 
 function SetRow({
   log,
+  prevLog,
+  weightStep,
   onWeightChange,
   onRepsChange,
   onToggleComplete,
 }: {
   log: SetLog
+  prevLog: SetLog | null
+  weightStep: number
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
   onToggleComplete: (id: string) => void
@@ -54,6 +71,8 @@ function SetRow({
   const { text, className } = setTypeLabel(log.set_type)
   const isWarmup = log.set_type === 'warmup'
   const completed = log.completed
+  const currentWeight = log.actual_weight ?? log.target_weight
+  const currentReps = log.actual_reps
 
   return (
     <div
@@ -61,24 +80,25 @@ function SetRow({
         completed ? 'bg-positive/5' : 'bg-transparent'
       }`}
     >
-      {/* Set index + type */}
+      {/* Set type label */}
       <div className="w-12 shrink-0 text-center">
         <span className={`text-xs font-semibold ${className} ${completed ? 'opacity-50' : ''}`}>
           {text}
         </span>
       </div>
 
-      {/* Weight */}
-      <div className="flex-1">
+      {/* Weight + delta */}
+      <div className="flex-1 flex flex-col items-center gap-0.5">
         {log.set_type === 'warmup' && log.target_weight === 45 ? (
-          <span className={`text-sm text-center block ${completed ? 'text-ink-disabled' : 'text-ink-secondary'}`}>
+          <span className={`text-sm ${completed ? 'text-ink-disabled' : 'text-ink-secondary'}`}>
             Bar
           </span>
         ) : (
           <input
             type="number"
             inputMode="decimal"
-            value={formatWeight(log.actual_weight ?? log.target_weight)}
+            step={weightStep}
+            value={formatWeight(currentWeight)}
             onChange={e => onWeightChange(log.id, e.target.value)}
             disabled={completed}
             className={`w-full text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
@@ -90,14 +110,17 @@ function SetRow({
               }`}
           />
         )}
+        {!isWarmup && (
+          <DeltaBadge current={currentWeight} previous={prevLog?.actual_weight ?? null} />
+        )}
       </div>
 
-      {/* Reps */}
-      <div className="flex-1">
+      {/* Reps + target label + delta */}
+      <div className="flex-1 flex flex-col items-center gap-0.5">
         <input
           type="number"
           inputMode="numeric"
-          placeholder={log.target_reps ?? ''}
+          step={1}
           value={log.actual_reps ?? ''}
           onChange={e => onRepsChange(log.id, e.target.value)}
           disabled={completed}
@@ -109,6 +132,12 @@ function SetRow({
                 : 'border-edge text-ink focus:border-accent'
             }`}
         />
+        {log.target_reps && !completed && (
+          <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
+        )}
+        {!isWarmup && currentReps !== null && (
+          <DeltaBadge current={currentReps} previous={prevLog?.actual_reps ?? null} />
+        )}
       </div>
 
       {/* Done checkbox */}
@@ -136,6 +165,7 @@ function SetRow({
 function ExerciseCard({
   exercise,
   sets,
+  prevSets,
   onWeightChange,
   onRepsChange,
   onToggleComplete,
@@ -144,6 +174,7 @@ function ExerciseCard({
 }: {
   exercise: ExerciseTemplate
   sets: SetLog[]
+  prevSets: SetLog[]
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
   onToggleComplete: (id: string) => void
@@ -204,6 +235,8 @@ function ExerciseCard({
             <SetRow
               key={log.id}
               log={log}
+              prevLog={prevSets.find(p => p.set_index === log.set_index && p.set_type === log.set_type) ?? null}
+              weightStep={exercise.rounding_increment}
               onWeightChange={onWeightChange}
               onRepsChange={onRepsChange}
               onToggleComplete={onToggleComplete}
@@ -288,7 +321,7 @@ export default function WorkoutScreen() {
         navigate(`/workout/${session.id}`, { replace: true })
 
         const exercises2 = await getExerciseTemplates(templateId)
-        setData({ session, template, exercises: exercises2, setLogs })
+        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs })
       } else {
         // Resume existing session
         if (!sessionId) throw new Error('No session ID')
@@ -302,7 +335,13 @@ export default function WorkoutScreen() {
 
         const exercises = await getExerciseTemplates(template.id)
         setLogs = await getSetLogsForSession(sessionId)
-        setData({ session, template, exercises, setLogs })
+
+        const lastSession = await getLastSessionForTemplate(template.id)
+        const lastLogs = lastSession && lastSession.id !== sessionId
+          ? await getSetLogsForSession(lastSession.id)
+          : []
+
+        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs })
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load workout')
@@ -479,6 +518,10 @@ export default function WorkoutScreen() {
             .filter(l => l.exercise_template_id === exercise.id)
             .sort((a, b) => a.set_index - b.set_index)
 
+          const prevExerciseSets = data.lastSetLogs
+            .filter(l => l.exercise_template_id === exercise.id)
+            .sort((a, b) => a.set_index - b.set_index)
+
           // Superset label: show before the first exercise in a group
           const prevExercise = exercises[idx - 1]
           const showSupersetLabel =
@@ -497,6 +540,7 @@ export default function WorkoutScreen() {
               <ExerciseCard
                 exercise={exercise}
                 sets={exerciseSets}
+                prevSets={prevExerciseSets}
                 onWeightChange={handleWeightChange}
                 onRepsChange={handleRepsChange}
                 onToggleComplete={handleToggleComplete}
