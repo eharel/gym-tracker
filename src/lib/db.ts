@@ -141,6 +141,33 @@ export async function discardSession(sessionId: string): Promise<void> {
   if (error) throw error
 }
 
+export interface SessionRow {
+  id: string
+  workout_template_id: string
+  template_name: string
+  started_at: string
+  completed_at: string | null
+  notes: string | null
+}
+
+/** Returns all sessions for a program (complete + in-progress), newest-first, with template name. */
+export async function getAllSessionsWithTemplate(programId: string): Promise<SessionRow[]> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('id, workout_template_id, started_at, completed_at, notes, workout_templates!inner(name, program_id)')
+    .eq('workout_templates.program_id', programId)
+    .order('started_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    workout_template_id: row.workout_template_id,
+    template_name: row.workout_templates.name,
+    started_at: row.started_at,
+    completed_at: row.completed_at,
+    notes: row.notes,
+  }))
+}
+
 // ─── Set logs ────────────────────────────────────────────────────────────────
 
 export async function getSetLogsForSession(sessionId: string): Promise<SetLog[]> {

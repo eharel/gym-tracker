@@ -237,6 +237,17 @@ export default function HomeScreen() {
             <p className="text-sm text-ink-secondary mt-0.5">{data.program.name}</p>
           </div>
           <button
+            onClick={() => navigate('/sessions')}
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-surface border border-edge text-ink-secondary hover:text-ink hover:border-edge-strong transition-colors active:opacity-70"
+            aria-label="Session history"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 8v4l3 3" />
+              <path d="M3.05 11a9 9 0 1 1 .5 4" />
+              <polyline points="3 16 3 11 8 11" />
+            </svg>
+          </button>
+          <button
             onClick={() => navigate('/program')}
             className="w-10 h-10 flex items-center justify-center rounded-xl bg-surface border border-edge text-ink-secondary hover:text-ink hover:border-edge-strong transition-colors active:opacity-70"
             aria-label="Program settings"
