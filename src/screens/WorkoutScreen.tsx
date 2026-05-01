@@ -110,9 +110,12 @@ function SetRow({
               }`}
           />
         )}
-        {!isWarmup && (
-          <DeltaBadge current={currentWeight} previous={prevLog?.actual_weight ?? null} />
-        )}
+        {/* Always render sub-label row to keep height consistent with reps column */}
+        <div className="h-4 flex items-center justify-center">
+          {!isWarmup && (
+            <DeltaBadge current={currentWeight} previous={prevLog?.actual_weight ?? null} />
+          )}
+        </div>
       </div>
 
       {/* Reps + target label + delta */}
@@ -132,12 +135,15 @@ function SetRow({
                 : 'border-edge text-ink focus:border-accent'
             }`}
         />
-        {log.target_reps && !completed && (
-          <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
-        )}
-        {!isWarmup && currentReps !== null && (
-          <DeltaBadge current={currentReps} previous={prevLog?.actual_reps ?? null} />
-        )}
+        {/* Always render sub-label row — shows target range, then delta once reps entered */}
+        <div className="h-4 flex items-center justify-center">
+          {!isWarmup && currentReps !== null
+            ? <DeltaBadge current={currentReps} previous={prevLog?.actual_reps ?? null} />
+            : log.target_reps && !completed
+              ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
+              : null
+          }
+        </div>
       </div>
 
       {/* Done checkbox */}
