@@ -1,1 +1,77 @@
 @import "tailwindcss";
+
+@theme {
+  /* ─── Surfaces ───────────────────────────────────────────
+     Four elevation levels. Use canvas → surface → elevated → overlay
+     as elements stack (page bg → cards → inputs → modals).       */
+  --color-canvas:   #09090f;
+  --color-surface:  #131320;
+  --color-elevated: #1c1c2e;
+  --color-overlay:  #252538;
+
+  /* ─── Borders ─────────────────────────────────────────── */
+  --color-edge:       #2e2e45;
+  --color-edge-strong: #42425e;
+
+  /* ─── Text ─────────────────────────────────────────────
+     ink → ink-secondary → ink-disabled in descending prominence. */
+  --color-ink:          #ededf5;
+  --color-ink-secondary: #8888a8;
+  --color-ink-disabled:  #454560;
+
+  /* ─── Accent ────────────────────────────────────────────
+     Orange — energetic, readable on dark surfaces.
+     Use accent/10 or accent/15 (Tailwind opacity modifier) for
+     tinted backgrounds instead of a separate muted token.         */
+  --color-accent: #f97316;
+
+  /* ─── Semantic ──────────────────────────────────────────
+     positive  = progression earned / success
+     caution   = staleness nudge / warning
+     negative  = error / destructive action                        */
+  --color-positive: #4ade80;
+  --color-caution:  #fbbf24;
+  --color-negative: #f87171;
+
+  /* ─── Radius ─────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* ─── Elevation shadows ─────────────────────────────────
+     Heavier than Tailwind defaults — dark backgrounds need
+     more contrast to show depth.                                   */
+  --shadow-card:     0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
+  --shadow-elevated: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
+
+  /* ─── Typography ─────────────────────────────────────── */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* ─── Touch target ──────────────────────────────────────
+     Apple HIG / WCAG minimum for interactive elements.
+     Use min-h-touch or min-w-touch on buttons, rows, etc.         */
+  --spacing-touch: 44px;
+}
+
+@layer base {
+  html {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* Prevents iOS Safari from zooming the viewport when an
+       input receives focus. Must be set at the root level.        */
+    font-size: 16px;
+    /* Removes the grey tap flash on interactive elements
+       in mobile Safari.                                           */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Belt-and-suspenders: ensure all form controls stay at 16px
+     so iOS never has a reason to zoom.                           */
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+}
