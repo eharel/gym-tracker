@@ -107,7 +107,7 @@ export default function RestTimer() {
       )}
 
       <div className="flex items-center gap-2">
-        {/* Duration / edit button — hidden while running */}
+        {/* Duration / edit button — idle only */}
         {!isRunning && !done && (
           <button
             onClick={() => setShowPicker(p => !p)}
@@ -125,9 +125,22 @@ export default function RestTimer() {
           </button>
         )}
 
-        {/* Main FAB */}
+        {/* Stop button — running only */}
+        {isRunning && (
+          <button
+            onClick={stop}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-surface/90 backdrop-blur border border-edge text-ink-disabled active:opacity-70 shadow-card"
+            aria-label="Stop timer"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+
+        {/* Main FAB — tap to start (idle) or restart (running) */}
         <button
-          onClick={isRunning ? stop : () => start()}
+          onClick={() => start()}
           className={`flex items-center justify-center rounded-full font-bold shadow-elevated transition-all active:scale-95
             ${done
               ? 'w-14 h-14 bg-positive text-gray-900'
@@ -139,7 +152,7 @@ export default function RestTimer() {
                    }`
                 : 'w-12 h-12 bg-surface/90 backdrop-blur border border-edge text-ink-secondary'
             }`}
-          aria-label={isRunning ? 'Stop timer' : 'Start rest timer'}
+          aria-label={isRunning ? 'Restart timer' : 'Start rest timer'}
         >
           {done ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
