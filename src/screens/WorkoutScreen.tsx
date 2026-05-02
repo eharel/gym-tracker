@@ -90,7 +90,7 @@ function StepBtn({ label, icon, onClick }: { label: string; icon: 'minus' | 'plu
   return (
     <button
       onClick={onClick}
-      className="w-7 h-7 rounded-lg bg-elevated border border-edge flex items-center justify-center text-ink-secondary active:opacity-60 shrink-0"
+      className="w-6 h-6 rounded-md bg-elevated border border-edge flex items-center justify-center text-ink-secondary active:opacity-60 shrink-0"
       aria-label={label}
     >
       {icon === 'minus' ? (
@@ -157,11 +157,6 @@ function SetRow({
     const v = String(next)
     setWeightDisplay(v)
     onWeightChange(log.id, v)
-  }
-
-  function stepReps(delta: number) {
-    const next = Math.max(0, (log.actual_reps ?? 0) + delta)
-    onRepsChange(log.id, String(next))
   }
 
   const numericWeight =
@@ -238,12 +233,9 @@ function SetRow({
         </div>
       </div>
 
-      {/* Reps column */}
+      {/* Reps column — plain input, no steppers (small integers are easy to type directly) */}
       <div className="flex-1 flex flex-col items-center gap-0.5">
-        <div className="w-full flex items-center gap-1">
-          {!completed && (
-            <StepBtn label="−1 rep" icon="minus" onClick={() => stepReps(-1)} />
-          )}
+        <div className="w-full">
           <input
             type="number"
             inputMode="numeric"
@@ -251,7 +243,7 @@ function SetRow({
             value={log.actual_reps ?? ''}
             onChange={e => onRepsChange(log.id, e.target.value)}
             disabled={completed}
-            className={`flex-1 min-w-0 text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
+            className={`w-full text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
               ${completed
                 ? 'border-transparent text-ink-disabled bg-transparent'
                 : isWarmup
@@ -259,9 +251,6 @@ function SetRow({
                   : 'border-edge text-ink focus:border-accent'
               }`}
           />
-          {!completed && (
-            <StepBtn label="+1 rep" icon="plus" onClick={() => stepReps(1)} />
-          )}
         </div>
         {/* Sub-label: target reps range then delta once entered */}
         <div className="h-4 flex items-center justify-center">
