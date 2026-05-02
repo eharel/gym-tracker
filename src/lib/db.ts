@@ -243,11 +243,42 @@ export async function recalcTargetWeights(
 
 // ─── Exercise notes ──────────────────────────────────────────────────────────
 
-export async function addExerciseNote(
+export async function getExerciseNotes(sessionId: string): Promise<ExerciseNote[]> {
+  const { data, error } = await supabase
+    .from('exercise_notes')
+    .select('*')
+    .eq('session_id', sessionId)
+  if (error) throw error
+  return data
+}
+
+/**
+ * Upsert a note for an exercise within a session.
+ * Pass `existingId` if a record already exists to update it.
+ * Returns null if the note is blank (record deleted or nothing to create).
+ */
+export async function saveExerciseNote(
   sessionId: string,
   exerciseTemplateId: string,
   note: string,
-): Promise<ExerciseNote> {
+  existingId?: string,
+): Promise<ExerciseNote | null> {
+  if (!note.trim()) {
+    if (existingId) {
+      await supabase.from('exercise_notes').delete().eq('id', existingId)
+    }
+    return null
+  }
+  if (existingId) {
+    const { data, error } = await supabase
+      .from('exercise_notes')
+      .update({ note })
+      .eq('id', existingId)
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  }
   const { data, error } = await supabase
     .from('exercise_notes')
     .insert({ session_id: sessionId, exercise_template_id: exerciseTemplateId, note })

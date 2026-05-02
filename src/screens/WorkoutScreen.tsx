@@ -3,10 +3,12 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   createSession,
   createSetLogs,
+  getExerciseNotes,
   getExerciseTemplates,
   getLastSessionForTemplate,
   getSetLogsForSession,
   getWorkoutTemplates,
+  saveExerciseNote,
   updateSetLog,
 } from '../lib/db'
 import { calcBackoffWeight, calcWarmupWeight, calcDumbbellWarmup, initializeSession } from '../lib/calculations'
@@ -20,14 +22,44 @@ interface WorkoutData {
   template: WorkoutTemplate
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
-  lastSetLogs: SetLog[]  // previous session's logs for delta comparison
+  lastSetLogs: SetLog[]
 }
+
+interface NoteEntry {
+  id?: string
+  text: string
+}
+
+type ExerciseGroup =
+  | ExerciseTemplate
+  | { superset: string; items: ExerciseTemplate[] }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatWeight(w: number | null): string {
   if (w === null) return ''
   return w === 0 ? '0' : String(w)
+}
+
+/**
+ * Returns the plate configuration for one side of a standard barbell (45 lb bar).
+ * e.g. plateBreakdown(230) → "45 + 45 + 2.5 / side"
+ */
+function plateBreakdown(totalWeight: number, barWeight = 45): string | null {
+  const available = [45, 35, 25, 10, 5, 2.5]
+  const perSide = (totalWeight - barWeight) / 2
+  if (perSide < 0) return null
+  if (perSide === 0) return 'bar only'
+  let rem = Math.round(perSide * 100) / 100
+  const plates: number[] = []
+  for (const p of available) {
+    while (rem >= p - 0.01) {
+      plates.push(p)
+      rem = Math.round((rem - p) * 100) / 100
+    }
+  }
+  if (rem > 0.1) return null // can't make this weight with standard plates
+  return plates.join(' + ') + ' / side'
 }
 
 function DeltaBadge({ current, previous }: { current: number | null; previous: number | null }) {
@@ -44,12 +76,35 @@ function DeltaBadge({ current, previous }: { current: number | null; previous: n
 
 function setTypeLabel(type: SetLog['set_type']): { text: string; className: string } {
   switch (type) {
-    case 'warmup':  return { text: 'Warm',   className: 'text-ink-disabled' }
-    case 'top':     return { text: 'Top',    className: 'text-accent' }
-    case 'backoff': return { text: 'Back',   className: 'text-ink-secondary' }
-    case 'working': return { text: 'Work',   className: 'text-ink-secondary' }
-    case 'amrap':   return { text: 'AMRAP',  className: 'text-positive' }
+    case 'warmup':  return { text: 'Warm',  className: 'text-ink-disabled' }
+    case 'top':     return { text: 'Top',   className: 'text-accent' }
+    case 'backoff': return { text: 'Back',  className: 'text-ink-secondary' }
+    case 'working': return { text: 'Work',  className: 'text-ink-secondary' }
+    case 'amrap':   return { text: 'AMRAP', className: 'text-positive' }
   }
+}
+
+// ─── Stepper button ───────────────────────────────────────────────────────────
+
+function StepBtn({ label, icon, onClick }: { label: string; icon: 'minus' | 'plus'; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-7 h-7 rounded-lg bg-elevated border border-edge flex items-center justify-center text-ink-secondary active:opacity-60 shrink-0"
+      aria-label={label}
+    >
+      {icon === 'minus' ? (
+        <svg width="10" height="2" viewBox="0 0 10 2" fill="currentColor">
+          <rect width="10" height="2" rx="1" />
+        </svg>
+      ) : (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+          <rect x="4" width="2" height="10" rx="1" />
+          <rect y="4" width="10" height="2" rx="1" />
+        </svg>
+      )}
+    </button>
+  )
 }
 
 // ─── Set row ─────────────────────────────────────────────────────────────────
@@ -72,8 +127,51 @@ function SetRow({
   const { text, className } = setTypeLabel(log.set_type)
   const isWarmup = log.set_type === 'warmup'
   const completed = log.completed
-  const currentWeight = log.actual_weight ?? log.target_weight
-  const currentReps = log.actual_reps
+  const weightInputRef = useRef<HTMLInputElement>(null)
+
+
+  // Local display state so clearing the field doesn't snap back to target_weight
+  const [weightDisplay, setWeightDisplay] = useState(() =>
+    formatWeight(log.actual_weight ?? log.target_weight),
+  )
+
+  // Sync from props when target recalculates (e.g. top-set weight changed),
+  // but only when the input isn't currently focused
+  useEffect(() => {
+    if (document.activeElement !== weightInputRef.current) {
+      setWeightDisplay(formatWeight(log.actual_weight ?? log.target_weight))
+    }
+  }, [log.actual_weight, log.target_weight])
+
+  function handleWeightInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const v = e.target.value
+    setWeightDisplay(v)
+    onWeightChange(log.id, v)
+  }
+
+  function stepWeight(delta: number) {
+    const current = parseFloat(weightDisplay) || 0
+    const next = Math.max(0, Math.round((current + delta) * 100) / 100)
+    const v = String(next)
+    setWeightDisplay(v)
+    onWeightChange(log.id, v)
+  }
+
+  function stepReps(delta: number) {
+    const next = Math.max(0, (log.actual_reps ?? 0) + delta)
+    onRepsChange(log.id, String(next))
+  }
+
+  const numericWeight =
+    weightDisplay === '' || isNaN(parseFloat(weightDisplay)) ? null : parseFloat(weightDisplay)
+
+  const isBelowTarget =
+    isWarmup &&
+    log.target_weight !== null &&
+    numericWeight !== null &&
+    numericWeight < log.target_weight
+
+  const isBar = isWarmup && log.target_weight === 45
 
   return (
     <div
@@ -88,21 +186,64 @@ function SetRow({
         </span>
       </div>
 
-      {/* Weight + delta */}
+      {/* Weight column */}
       <div className="flex-1 flex flex-col items-center gap-0.5">
-        {log.set_type === 'warmup' && log.target_weight === 45 ? (
-          <span className={`text-sm ${completed ? 'text-ink-disabled' : 'text-ink-secondary'}`}>
+        {isBar ? (
+          <span className={`text-sm py-2 ${completed ? 'text-ink-disabled' : 'text-ink-secondary'}`}>
             Bar
           </span>
         ) : (
+          <div className="w-full flex items-center gap-1">
+            {!completed && (
+              <StepBtn label={`−${weightStep}`} icon="minus" onClick={() => stepWeight(-weightStep)} />
+            )}
+            <input
+              ref={weightInputRef}
+              type="number"
+              inputMode="decimal"
+              step={weightStep}
+              value={weightDisplay}
+              onChange={handleWeightInput}
+              disabled={completed}
+              className={`flex-1 min-w-0 text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
+                ${completed
+                  ? 'border-transparent text-ink-disabled bg-transparent'
+                  : isBelowTarget
+                    ? 'border-caution/60 text-caution focus:border-caution'
+                    : isWarmup
+                      ? 'border-edge text-ink-secondary focus:border-edge-strong'
+                      : 'border-edge text-ink focus:border-accent'
+                }`}
+            />
+            {!completed && (
+              <StepBtn label={`+${weightStep}`} icon="plus" onClick={() => stepWeight(weightStep)} />
+            )}
+          </div>
+        )}
+        {/* Sub-label: delta (non-warmup) or below-target warning (warmup) */}
+        <div className="h-4 flex items-center justify-center">
+          {!isWarmup ? (
+            <DeltaBadge current={numericWeight} previous={prevLog?.actual_weight ?? null} />
+          ) : isBelowTarget ? (
+            <span className="text-xs text-caution tabular-nums">target {log.target_weight}</span>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Reps column */}
+      <div className="flex-1 flex flex-col items-center gap-0.5">
+        <div className="w-full flex items-center gap-1">
+          {!completed && (
+            <StepBtn label="−1 rep" icon="minus" onClick={() => stepReps(-1)} />
+          )}
           <input
             type="number"
-            inputMode="decimal"
-            step={weightStep}
-            value={formatWeight(currentWeight)}
-            onChange={e => onWeightChange(log.id, e.target.value)}
+            inputMode="numeric"
+            step={1}
+            value={log.actual_reps ?? ''}
+            onChange={e => onRepsChange(log.id, e.target.value)}
             disabled={completed}
-            className={`w-full text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
+            className={`flex-1 min-w-0 text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
               ${completed
                 ? 'border-transparent text-ink-disabled bg-transparent'
                 : isWarmup
@@ -110,36 +251,14 @@ function SetRow({
                   : 'border-edge text-ink focus:border-accent'
               }`}
           />
-        )}
-        {/* Always render sub-label row to keep height consistent with reps column */}
-        <div className="h-4 flex items-center justify-center">
-          {!isWarmup && (
-            <DeltaBadge current={currentWeight} previous={prevLog?.actual_weight ?? null} />
+          {!completed && (
+            <StepBtn label="+1 rep" icon="plus" onClick={() => stepReps(1)} />
           )}
         </div>
-      </div>
-
-      {/* Reps + target label + delta */}
-      <div className="flex-1 flex flex-col items-center gap-0.5">
-        <input
-          type="number"
-          inputMode="numeric"
-          step={1}
-          value={log.actual_reps ?? ''}
-          onChange={e => onRepsChange(log.id, e.target.value)}
-          disabled={completed}
-          className={`w-full text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
-            ${completed
-              ? 'border-transparent text-ink-disabled bg-transparent'
-              : isWarmup
-                ? 'border-edge text-ink-secondary focus:border-edge-strong'
-                : 'border-edge text-ink focus:border-accent'
-            }`}
-        />
-        {/* Always render sub-label row — shows target range, then delta once reps entered */}
+        {/* Sub-label: target reps range then delta once entered */}
         <div className="h-4 flex items-center justify-center">
-          {!isWarmup && currentReps !== null
-            ? <DeltaBadge current={currentReps} previous={prevLog?.actual_reps ?? null} />
+          {!isWarmup && log.actual_reps !== null
+            ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} />
             : log.target_reps && !completed
               ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
               : null
@@ -173,46 +292,55 @@ function ExerciseCard({
   exercise,
   sets,
   prevSets,
+  note,
+  skipped,
   onWeightChange,
   onRepsChange,
   onToggleComplete,
   onSkip,
-  skipped,
+  onNoteChange,
 }: {
   exercise: ExerciseTemplate
   sets: SetLog[]
   prevSets: SetLog[]
+  note: NoteEntry
+  skipped: boolean
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
   onToggleComplete: (id: string) => void
   onSkip: (id: string, skipped: boolean) => void
-  skipped: boolean
+  onNoteChange: (exerciseId: string, text: string) => void
 }) {
   const workingSets = sets.filter(s => s.set_type !== 'warmup')
   const allDone = workingSets.length > 0 && workingSets.every(s => s.completed)
   const completedCount = workingSets.filter(s => s.completed).length
-
   const [collapsed, setCollapsed] = useState(false)
 
-  // Auto-collapse when all working sets are marked done
   useEffect(() => {
     if (allDone) setCollapsed(true)
   }, [allDone])
 
-  const topSet = sets.find(s => s.set_type === 'top')
-  const workingSet = sets.find(s => s.set_type === 'working')
-  const displayWeight = (topSet ?? workingSet)?.actual_weight ?? (topSet ?? workingSet)?.target_weight
+  // Barbell exercises use percentage_of_top_set warmup rule
+  const isBarbell = exercise.warmup_rule === 'percentage_of_top_set'
+
+  // Current working weight for plate breakdown and collapsed summary
+  const topSet = sets.find(s => s.set_type === 'top') ?? sets.find(s => s.set_type === 'working')
+  const workingWeight = topSet?.actual_weight ?? topSet?.target_weight ?? null
+  const plates = isBarbell && workingWeight ? plateBreakdown(workingWeight) : null
+
+  // Previous session's working weight
+  const prevTopSet = prevSets.find(s => s.set_type === 'top') ?? prevSets.find(s => s.set_type === 'working')
+  const prevWeight = prevTopSet?.actual_weight ?? null
 
   return (
     <div className={`bg-surface/80 border rounded-2xl overflow-hidden transition-opacity ${
       skipped ? 'opacity-40 border-edge' : allDone ? 'border-positive/30' : 'border-edge shadow-card'
     }`}>
-      {/* Card header — always visible, tap to collapse/expand */}
+      {/* Header — tap to collapse/expand */}
       <button
         onClick={() => setCollapsed(c => !c)}
         className="w-full px-4 pt-4 pb-3 flex items-center gap-3 text-left active:opacity-70"
       >
-        {/* Done indicator */}
         <div className={`w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center transition-colors ${
           allDone ? 'bg-positive border-positive' : skipped ? 'border-edge' : 'border-edge-strong'
         }`}>
@@ -228,18 +356,22 @@ function ExerciseCard({
             {exercise.name}
           </h3>
           {collapsed ? (
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-ink-disabled">
-                {skipped ? 'Skipped' : `${completedCount}/${workingSets.length} sets`}
-                {displayWeight != null && !skipped ? ` · ${displayWeight} lbs` : ''}
-              </span>
-            </div>
+            <span className="text-xs text-ink-disabled">
+              {skipped ? 'Skipped' : `${completedCount}/${workingSets.length} sets`}
+              {workingWeight != null && !skipped ? ` · ${workingWeight} lbs` : ''}
+            </span>
           ) : (
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               {exercise.rpe_target && (
                 <span className="text-xs text-ink-secondary">RPE {exercise.rpe_target}</span>
               )}
-              {exercise.notes && (
+              {prevWeight !== null && (
+                <span className="text-xs text-ink-disabled">prev {prevWeight} lbs</span>
+              )}
+              {plates && (
+                <span className="text-xs text-ink-disabled font-mono">{plates}</span>
+              )}
+              {exercise.notes && !plates && !prevWeight && (
                 <span className="text-xs text-ink-disabled truncate">{exercise.notes}</span>
               )}
             </div>
@@ -302,6 +434,17 @@ function ExerciseCard({
               />
             ))}
           </div>
+
+          {/* Per-exercise notes */}
+          <div className="px-3 pb-3">
+            <textarea
+              value={note.text}
+              onChange={e => onNoteChange(exercise.id, e.target.value)}
+              placeholder="Notes for this exercise…"
+              rows={2}
+              className="w-full text-sm text-ink-secondary bg-elevated/60 border border-edge rounded-xl px-3 py-2 placeholder:text-ink-disabled resize-none outline-none focus:border-edge-strong transition-colors"
+            />
+          </div>
         </>
       )}
     </div>
@@ -347,8 +490,14 @@ export default function WorkoutScreen() {
   const [error, setError] = useState<string | null>(null)
   const [skipped, setSkipped] = useState<Set<string>>(new Set())
   const [completing, setCompleting] = useState(false)
+  const [notes, setNotes] = useState<Record<string, NoteEntry>>({})
+
   const pendingUpdates = useRef<Map<string, Partial<SetLog>>>(new Map())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const noteFlushTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Keep a ref so note flush closures always see the latest state
+  const notesRef = useRef<Record<string, NoteEntry>>({})
+  useEffect(() => { notesRef.current = notes }, [notes])
 
   async function load() {
     try {
@@ -357,33 +506,28 @@ export default function WorkoutScreen() {
       let setLogs: SetLog[]
 
       if (sessionId === 'new') {
-        // Start a brand-new session
         const templateId = searchParams.get('template')
         if (!templateId) throw new Error('No template specified')
 
         const templates = await getWorkoutTemplates(
-          // fetch by templateId to get program_id
           (await import('../lib/db').then(m => m.getActiveProgram()))?.id ?? '',
         )
         template = templates.find(t => t.id === templateId) ?? templates[0]
 
         const exercises = await getExerciseTemplates(templateId)
         const lastSession = await getLastSessionForTemplate(templateId)
-        const lastLogs = lastSession
-          ? await getSetLogsForSession(lastSession.id)
-          : []
+        const lastLogs = lastSession ? await getSetLogsForSession(lastSession.id) : []
 
         session = await createSession(templateId)
         const newLogs = initializeSession(exercises, lastLogs)
         setLogs = await createSetLogs(session.id, newLogs)
 
-        // Replace /workout/new URL with the real session ID so reload works
         navigate(`/workout/${session.id}`, { replace: true })
 
         const exercises2 = await getExerciseTemplates(templateId)
         setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs })
+        setNotes({})
       } else {
-        // Resume existing session
         if (!sessionId) throw new Error('No session ID')
         const { getInProgressSession } = await import('../lib/db')
         session = (await getInProgressSession()) ?? { id: sessionId } as Session
@@ -401,7 +545,14 @@ export default function WorkoutScreen() {
           ? await getSetLogsForSession(lastSession.id)
           : []
 
+        const existingNotes = await getExerciseNotes(sessionId)
+        const notesMap: Record<string, NoteEntry> = {}
+        existingNotes.forEach(n => {
+          notesMap[n.exercise_template_id] = { id: n.id, text: n.note }
+        })
+
         setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs })
+        setNotes(notesMap)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load workout')
@@ -410,7 +561,8 @@ export default function WorkoutScreen() {
 
   useEffect(() => { load() }, [sessionId])
 
-  // Debounced flush — batches rapid input changes into fewer DB writes
+  // ── Set log writes (debounced) ──────────────────────────────────────────────
+
   function scheduleFlush(logId: string, updates: Partial<SetLog>) {
     pendingUpdates.current.set(logId, {
       ...(pendingUpdates.current.get(logId) ?? {}),
@@ -443,11 +595,12 @@ export default function WorkoutScreen() {
     const log = data?.setLogs.find(l => l.id === logId)
     if (!log) return
 
-    const weight = value === '' ? null : parseFloat(value)
+    const parsed = value === '' ? null : parseFloat(value)
+    const weight = parsed === null || isNaN(parsed) ? null : parsed
     const isOverride = weight !== log.target_weight
     updateLog(logId, { actual_weight: weight, is_weight_override: isOverride })
 
-    // If this is a top set, recalculate warmup and backoff targets for this exercise
+    // When top set weight changes, recalculate warmup + backoff targets for this exercise
     if (log.set_type === 'top' && weight !== null && data) {
       const exercise = data.exercises.find(e => e.id === log.exercise_template_id)
       if (!exercise) return
@@ -485,17 +638,58 @@ export default function WorkoutScreen() {
     if (!log) return
     const newCompleted = !log.completed
     updateLog(logId, { completed: newCompleted })
-    // Flush immediately on complete/uncomplete — don't wait for debounce
     if (flushTimer.current) clearTimeout(flushTimer.current)
     await updateSetLog(logId, { completed: newCompleted })
+  }
+
+  // ── Note writes (debounced 1.5 s) ──────────────────────────────────────────
+
+  function handleNoteChange(exerciseId: string, text: string) {
+    setNotes(prev => ({
+      ...prev,
+      [exerciseId]: { ...(prev[exerciseId] ?? {}), text },
+    }))
+
+    const existing = noteFlushTimers.current.get(exerciseId)
+    if (existing) clearTimeout(existing)
+
+    // Capture session ID and existing note ID now; text is fresh in the closure
+    const sid = data?.session.id
+    const existingId = notesRef.current[exerciseId]?.id
+
+    const timer = setTimeout(async () => {
+      if (!sid) return
+      const saved = await saveExerciseNote(sid, exerciseId, text, existingId)
+      if (saved) {
+        setNotes(prev => ({ ...prev, [exerciseId]: { id: saved.id, text: saved.note } }))
+      } else if (!text.trim()) {
+        setNotes(prev => { const next = { ...prev }; delete next[exerciseId]; return next })
+      }
+    }, 1500)
+
+    noteFlushTimers.current.set(exerciseId, timer)
   }
 
   async function handleCompleteSession() {
     if (!data) return
     setCompleting(true)
-    // Flush any pending input updates first
+
+    // Flush debounced set-log writes
     if (flushTimer.current) clearTimeout(flushTimer.current)
     await flushPending()
+
+    // Flush any pending note saves (save all non-empty notes)
+    noteFlushTimers.current.forEach(t => clearTimeout(t))
+    noteFlushTimers.current.clear()
+    const latestNotes = notesRef.current
+    await Promise.all(
+      Object.entries(latestNotes)
+        .filter(([, v]) => v.text.trim())
+        .map(([exerciseId, v]) =>
+          saveExerciseNote(data.session.id, exerciseId, v.text, v.id),
+        ),
+    )
+
     const { completeSession } = await import('../lib/db')
     await completeSession(data.session.id)
     navigate(`/summary/${data.session.id}`, { replace: true })
@@ -508,6 +702,8 @@ export default function WorkoutScreen() {
       return next
     })
   }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   if (error) {
     return (
@@ -530,19 +726,53 @@ export default function WorkoutScreen() {
 
   const { template, exercises, setLogs } = data
 
-  // Group exercises by superset_group for labeling
-  const supersetGroups = new Map<string, string[]>()
-  exercises.forEach(e => {
-    if (e.superset_group) {
-      const g = supersetGroups.get(e.superset_group) ?? []
-      g.push(e.id)
-      supersetGroups.set(e.superset_group, g)
-    }
-  })
-
   const allWorkingSetsComplete = setLogs
     .filter(l => !skipped.has(l.exercise_template_id) && (l.set_type === 'top' || l.set_type === 'working' || l.set_type === 'backoff'))
     .every(l => l.completed)
+
+  // Group consecutive superset exercises so they can be rendered together
+  const exerciseGroups: ExerciseGroup[] = []
+  let i = 0
+  while (i < exercises.length) {
+    const e = exercises[i]
+    if (e.superset_group) {
+      const group: ExerciseTemplate[] = [e]
+      while (i + 1 < exercises.length && exercises[i + 1].superset_group === e.superset_group) {
+        i++
+        group.push(exercises[i])
+      }
+      // Only render as a grouped block if ≥2 exercises share the tag
+      exerciseGroups.push(group.length > 1 ? { superset: e.superset_group, items: group } : e)
+    } else {
+      exerciseGroups.push(e)
+    }
+    i++
+  }
+
+  function renderCard(exercise: ExerciseTemplate) {
+    const exerciseSets = setLogs
+      .filter(l => l.exercise_template_id === exercise.id)
+      .sort((a, b) => a.set_index - b.set_index)
+    const prevExerciseSets = data!.lastSetLogs
+      .filter(l => l.exercise_template_id === exercise.id)
+      .sort((a, b) => a.set_index - b.set_index)
+
+    return (
+      <ExerciseCard
+        key={exercise.id}
+        exercise={exercise}
+        sets={exerciseSets}
+        prevSets={prevExerciseSets}
+        note={notes[exercise.id] ?? { text: '' }}
+        skipped={skipped.has(exercise.id)}
+        onWeightChange={handleWeightChange}
+        onRepsChange={handleRepsChange}
+        onToggleComplete={handleToggleComplete}
+        onSkip={handleSkip}
+        onNoteChange={handleNoteChange}
+      />
+    )
+  }
 
   return (
     <div className="min-h-screen">
@@ -554,7 +784,7 @@ export default function WorkoutScreen() {
           <button
             onClick={() => navigate('/')}
             className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface border border-edge text-ink-secondary active:opacity-70"
-            aria-label="Back"
+            aria-label="Back to home"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
@@ -573,43 +803,25 @@ export default function WorkoutScreen() {
           <CollapsibleBlock title="Warmup" text={template.warmup_text} />
         )}
 
-        {/* Exercise cards */}
-        {exercises.map((exercise, idx) => {
-          const exerciseSets = setLogs
-            .filter(l => l.exercise_template_id === exercise.id)
-            .sort((a, b) => a.set_index - b.set_index)
-
-          const prevExerciseSets = data.lastSetLogs
-            .filter(l => l.exercise_template_id === exercise.id)
-            .sort((a, b) => a.set_index - b.set_index)
-
-          // Superset label: show before the first exercise in a group
-          const prevExercise = exercises[idx - 1]
-          const showSupersetLabel =
-            exercise.superset_group &&
-            exercise.superset_group !== prevExercise?.superset_group
-
-          return (
-            <div key={exercise.id}>
-              {showSupersetLabel && (
-                <div className="flex items-center gap-2 px-1">
-                  <div className="flex-1 h-px bg-edge" />
-                  <span className="text-xs text-ink-disabled font-medium">Superset</span>
-                  <div className="flex-1 h-px bg-edge" />
+        {/* Exercise cards — supersets get a visual left-bar connector */}
+        {exerciseGroups.map(group => {
+          if ('superset' in group) {
+            return (
+              <div key={group.superset} className="flex gap-2.5">
+                {/* Vertical accent line connecting the group */}
+                <div className="flex flex-col items-center pt-6 pb-1 shrink-0">
+                  <div className="w-0.5 flex-1 bg-accent/25 rounded-full" />
                 </div>
-              )}
-              <ExerciseCard
-                exercise={exercise}
-                sets={exerciseSets}
-                prevSets={prevExerciseSets}
-                onWeightChange={handleWeightChange}
-                onRepsChange={handleRepsChange}
-                onToggleComplete={handleToggleComplete}
-                onSkip={handleSkip}
-                skipped={skipped.has(exercise.id)}
-              />
-            </div>
-          )
+                <div className="flex-1 flex flex-col gap-2">
+                  <p className="text-xs text-accent/70 font-semibold uppercase tracking-widest px-1">
+                    Superset
+                  </p>
+                  {group.items.map(renderCard)}
+                </div>
+              </div>
+            )
+          }
+          return renderCard(group as ExerciseTemplate)
         })}
 
         {/* Cooldown */}
