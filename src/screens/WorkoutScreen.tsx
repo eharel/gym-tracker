@@ -113,6 +113,7 @@ function SetRow({
   log,
   prevLog,
   weightStep,
+  isBarbell,
   onWeightChange,
   onRepsChange,
   onToggleComplete,
@@ -120,6 +121,7 @@ function SetRow({
   log: SetLog
   prevLog: SetLog | null
   weightStep: number
+  isBarbell: boolean
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
   onToggleComplete: (id: string) => void
@@ -172,6 +174,8 @@ function SetRow({
     numericWeight < log.target_weight
 
   const isBar = isWarmup && log.target_weight === 45
+  // Per-set plate breakdown — skip the "Bar" row (no plates needed) and blank weights
+  const plateStr = isBarbell && !isBar && numericWeight ? plateBreakdown(numericWeight) : null
 
   return (
     <div
@@ -220,13 +224,17 @@ function SetRow({
             )}
           </div>
         )}
-        {/* Sub-label: delta (non-warmup) or below-target warning (warmup) */}
-        <div className="h-4 flex items-center justify-center">
-          {!isWarmup ? (
+        {/* Sub-label: delta + plate breakdown (stacked); below-target warning for warmup */}
+        <div className="min-h-4 flex flex-col items-center justify-center gap-px">
+          {!isWarmup && (
             <DeltaBadge current={numericWeight} previous={prevLog?.actual_weight ?? null} />
-          ) : isBelowTarget ? (
+          )}
+          {plateStr && (
+            <span className="text-xs text-ink-disabled tabular-nums leading-tight">{plateStr}</span>
+          )}
+          {isWarmup && isBelowTarget && (
             <span className="text-xs text-caution tabular-nums">target {log.target_weight}</span>
-          ) : null}
+          )}
         </div>
       </div>
 
@@ -428,6 +436,7 @@ function ExerciseCard({
                 log={log}
                 prevLog={prevSets.find(p => p.set_index === log.set_index && p.set_type === log.set_type) ?? null}
                 weightStep={exercise.rounding_increment}
+                isBarbell={isBarbell}
                 onWeightChange={onWeightChange}
                 onRepsChange={onRepsChange}
                 onToggleComplete={onToggleComplete}
