@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getActiveProgram, getAllSessionsWithTemplate, discardSession, type SessionRow } from '../lib/db'
 
+
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
     weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
@@ -20,9 +22,11 @@ function formatDuration(startedAt: string, completedAt: string | null): string |
 function SessionCard({
   session,
   onDelete,
+  onNavigate,
 }: {
   session: SessionRow
   onDelete: (id: string) => void
+  onNavigate: (id: string) => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -36,7 +40,11 @@ function SessionCard({
 
   return (
     <div className="bg-surface/80 border border-edge rounded-2xl px-4 py-3 flex items-center gap-3">
-      <div className="flex-1 min-w-0">
+      {/* Tappable main area → session detail */}
+      <button
+        onClick={() => !confirming && onNavigate(session.id)}
+        className="flex-1 min-w-0 text-left active:opacity-70"
+      >
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-ink truncate">{session.template_name}</span>
           {!session.completed_at && (
@@ -56,7 +64,7 @@ function SessionCard({
             <span className="text-xs text-ink-disabled">· {duration}</span>
           )}
         </div>
-      </div>
+      </button>
 
       {confirming ? (
         <div className="flex items-center gap-2 shrink-0">
@@ -151,7 +159,12 @@ export default function SessionsScreen() {
         ) : (
           <div className="flex flex-col gap-2">
             {sessions.map(session => (
-              <SessionCard key={session.id} session={session} onDelete={handleDelete} />
+              <SessionCard
+                key={session.id}
+                session={session}
+                onDelete={handleDelete}
+                onNavigate={id => navigate(`/sessions/${id}`)}
+              />
             ))}
           </div>
         )}

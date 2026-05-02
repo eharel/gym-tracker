@@ -37,7 +37,7 @@ function fmt(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-export default function RestTimer() {
+export default function RestTimer({ startSignal = 0 }: { startSignal?: number }) {
   const [duration, setDuration] = useState<number>(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
     return saved ? parseInt(saved, 10) : 120
@@ -46,8 +46,18 @@ export default function RestTimer() {
   const [done, setDone] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const prevSignalRef = useRef(0)
 
   useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current) }, [])
+
+  // Auto-start when a new set is completed (startSignal increments)
+  useEffect(() => {
+    if (startSignal > 0 && startSignal !== prevSignalRef.current) {
+      prevSignalRef.current = startSignal
+      start()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startSignal])
 
   function start(secs = duration) {
     if (intervalRef.current) clearInterval(intervalRef.current)

@@ -103,19 +103,50 @@ export function getNextWorkoutTemplate(
 
 // ─── Session initialization ─────────────────────────────────────────────────
 
-function getLastWeightForExercise(
-  exerciseTemplateId: string,
-  lastSetLogs: SetLog[],
-): number | null {
-  const top = lastSetLogs.find(
-    l => l.exercise_template_id === exerciseTemplateId && l.set_type === 'top',
-  )
-  if (top?.actual_weight != null) return top.actual_weight
+/**
+ * Returns the suggested starting weight for the next session of a given exercise.
+ * If the previous session earned progression (hit the top of the rep range for all
+ * required sets), the weight is automatically bumped by the exercise's increment.
+ */
+function getSuggestedWeight(ex: ExerciseTemplate, lastSetLogs: SetLog[]): number | null {
+  if (ex.working_set_type === 'top_set') {
+    const topSet = lastSetLogs.find(
+      l => l.exercise_template_id === ex.id && l.set_type === 'top' && l.completed,
+    )
+    if (!topSet?.actual_weight) return null
+    if (
+      topSet.actual_reps !== null &&
+      ex.working_rep_target &&
+      hasEarnedProgression(ex.working_rep_target, topSet.actual_reps)
+    ) {
+      return topSet.actual_weight + ex.weight_increment
+    }
+    return topSet.actual_weight
+  }
 
-  const working = lastSetLogs.find(
-    l => l.exercise_template_id === exerciseTemplateId && l.set_type === 'working',
+  // straight_sets or amrap
+  const workingSets = lastSetLogs.filter(
+    l =>
+      l.exercise_template_id === ex.id &&
+      (l.set_type === 'working' || l.set_type === 'amrap') &&
+      l.completed &&
+      l.actual_weight !== null,
   )
-  return working?.actual_weight ?? null
+  if (workingSets.length === 0) return null
+  const lastWeight = workingSets[0].actual_weight!
+
+  if (
+    ex.working_set_type === 'straight_sets' &&
+    ex.working_rep_target &&
+    workingSets.length >= ex.working_set_count &&
+    workingSets.every(
+      l => l.actual_reps !== null && hasEarnedProgression(ex.working_rep_target!, l.actual_reps!),
+    )
+  ) {
+    return lastWeight + ex.weight_increment
+  }
+
+  return lastWeight
 }
 
 /** Returns the actual_reps logged for a specific set in the previous session, or null if none. */
@@ -151,7 +182,7 @@ export function initializeSession(
 
   for (const ex of sorted) {
     let setIndex = 0
-    const workingWeight = getLastWeightForExercise(ex.id, lastSetLogs)
+    const workingWeight = getSuggestedWeight(ex, lastSetLogs)
 
     // Warmup sets
     if (ex.warmup_rule !== 'none' && workingWeight !== null) {

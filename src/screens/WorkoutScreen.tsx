@@ -525,6 +525,7 @@ export default function WorkoutScreen() {
   const [skipped, setSkipped] = useState<Set<string>>(new Set())
   const [completing, setCompleting] = useState(false)
   const [notes, setNotes] = useState<Record<string, NoteEntry>>({})
+  const [restSignal, setRestSignal] = useState(0)
 
   const pendingUpdates = useRef<Map<string, Partial<SetLog>>>(new Map())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -688,6 +689,10 @@ export default function WorkoutScreen() {
     updateLog(logId, { completed: newCompleted })
     if (flushTimer.current) clearTimeout(flushTimer.current)
     await updateSetLog(logId, { completed: newCompleted })
+    // Kick off rest timer when any non-warmup set is marked complete
+    if (newCompleted && log.set_type !== 'warmup') {
+      setRestSignal(s => s + 1)
+    }
   }
 
   // ── Note writes (debounced 1.5 s) ──────────────────────────────────────────
@@ -825,7 +830,7 @@ export default function WorkoutScreen() {
 
   return (
     <div className="min-h-screen">
-      <RestTimer />
+      <RestTimer startSignal={restSignal} />
       <div className="max-w-md mx-auto px-4 py-8 flex flex-col gap-4">
 
         {/* Header */}

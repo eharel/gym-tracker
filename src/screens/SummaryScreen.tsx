@@ -184,20 +184,27 @@ export default function SummaryScreen() {
           </div>
         </div>
 
-        {/* Progression earned */}
+        {/* Progression earned — automatically applied next session */}
         {progressions.length > 0 && (
           <div className="bg-positive/10 border border-positive/25 rounded-2xl p-4 flex flex-col gap-3">
-            <p className="text-sm font-semibold text-positive">Ready to progress</p>
+            <div className="flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-positive shrink-0">
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                <polyline points="17 6 23 6 23 12" />
+              </svg>
+              <p className="text-sm font-semibold text-positive">Progression applied</p>
+            </div>
             <div className="flex flex-col gap-2">
               {progressions.map(({ exercise, newWeight }) => (
                 <div key={exercise.id} className="flex items-center justify-between gap-3">
                   <span className="text-sm text-ink">{exercise.name}</span>
                   <span className="text-sm font-semibold text-positive tabular-nums">
-                    → {newWeight} lbs next session
+                    → {newWeight} lbs
                   </span>
                 </div>
               ))}
             </div>
+            <p className="text-xs text-ink-disabled">Weight will be pre-loaded next session.</p>
           </div>
         )}
 

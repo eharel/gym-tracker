@@ -322,6 +322,17 @@ export default function ExerciseEditorScreen() {
             <h1 className="text-xl font-bold text-ink truncate">{name || 'Exercise'}</h1>
             {saving && <p className="text-xs text-ink-disabled">Saving…</p>}
           </div>
+          {/* History button */}
+          <button
+            onClick={() => navigate(`/program/exercise/${exerciseId}/history?templateId=${templateId}`)}
+            className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface border border-edge text-ink-secondary active:opacity-70 shrink-0"
+            aria-label="View history"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3.05 11a9 9 0 1 1 .5 4" />
+              <polyline points="3 16 3 11 8 11" />
+            </svg>
+          </button>
         </div>
 
         {/* ── Basic info ────────────────────────────────────────────────────── */}

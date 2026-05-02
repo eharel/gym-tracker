@@ -94,9 +94,11 @@ function NextWorkoutCard({
 function LastSessionCard({
   session,
   template,
+  onClick,
 }: {
   session: Session
   template: WorkoutTemplate
+  onClick: () => void
 }) {
   const date = new Date(session.completed_at!)
   const formatted = date.toLocaleDateString('en-US', {
@@ -106,7 +108,10 @@ function LastSessionCard({
   })
 
   return (
-    <div className="bg-surface/60 border border-edge rounded-2xl p-5 flex items-center justify-between gap-4">
+    <button
+      onClick={onClick}
+      className="w-full bg-surface/60 border border-edge rounded-2xl p-5 flex items-center justify-between gap-4 text-left active:opacity-70"
+    >
       <div className="flex flex-col gap-0.5">
         <p className="text-xs font-medium text-ink-disabled uppercase tracking-wider">Last session</p>
         <h3 className="text-base font-semibold text-ink">{template.name}</h3>
@@ -117,7 +122,7 @@ function LastSessionCard({
           <polyline points="9 18 15 12 9 6" />
         </svg>
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -283,6 +288,7 @@ export default function HomeScreen() {
           <LastSessionCard
             session={data.lastSession}
             template={data.lastTemplate}
+            onClick={() => navigate(`/sessions/${data.lastSession!.id}`)}
           />
         )}
 
