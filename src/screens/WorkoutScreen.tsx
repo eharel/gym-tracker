@@ -188,13 +188,17 @@ function SetRow({
       {/* Weight column */}
       <div className="flex-1 flex flex-col items-center gap-0.5">
         {isBar ? (
-          <span className={`w-full block text-center text-sm font-medium rounded-lg py-2 border
-            ${completed
-              ? 'bg-transparent border-transparent text-ink-disabled'
-              : 'bg-elevated border-edge text-ink-secondary'
-            }`}>
-            Bar
-          </span>
+          <div className="w-full flex items-center gap-1">
+            {!completed && <div className="w-6 h-6 shrink-0" />}
+            <span className={`flex-1 block text-center text-sm font-medium rounded-lg py-2 border
+              ${completed
+                ? 'bg-transparent border-transparent text-ink-disabled'
+                : 'bg-elevated border-edge text-ink-secondary'
+              }`}>
+              Bar
+            </span>
+            {!completed && <div className="w-6 h-6 shrink-0" />}
+          </div>
         ) : (
           <div className="w-full flex items-center gap-1">
             {!completed && (
