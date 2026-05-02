@@ -1,101 +1,67 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getSetLogsForExercise } from '../lib/db'
-
+import LineChart from '../components/LineChart'
 import { supabase } from '../lib/supabase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type Metric = 'weight' | 'e1rm' | 'volume'
+
 interface DataPoint {
-  date: string          // session completed_at ISO
-  weight: number        // top/working set actual_weight
-  reps: number | null   // actual_reps for that set
+  date:      string        // completed_at ISO
+  shortDate: string        // "Jan 5"
+  weight:    number        // top/working set actual_weight
+  reps:      number | null
+  volume:    number        // Σ weight × reps for all completed working sets
+  e1rm:      number | null // Epley estimate, null when no reps
   sessionId: string
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatShortDate(iso: string): string {
+function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-// ─── Mini sparkline ───────────────────────────────────────────────────────────
+function longDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  })
+}
 
-function Sparkline({ points, width = 280, height = 64 }: { points: DataPoint[]; width?: number; height?: number }) {
-  if (points.length < 2) return null
-
-  const weights = points.map(p => p.weight)
-  const minW = Math.min(...weights)
-  const maxW = Math.max(...weights)
-  const range = maxW - minW || 1
-
-  const xs = points.map((_, i) => (i / (points.length - 1)) * (width - 16) + 8)
-  const ys = points.map(p => height - 8 - ((p.weight - minW) / range) * (height - 16))
-
-  const pathD = xs.map((x, i) => `${i === 0 ? 'M' : 'L'} ${x} ${ys[i]}`).join(' ')
-
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
-      {/* Grid line at max */}
-      <line
-        x1={8} y1={8} x2={width - 8} y2={8}
-        stroke="currentColor" strokeWidth="0.5" className="text-edge" strokeDasharray="3 3"
-      />
-      {/* Line */}
-      <path
-        d={pathD}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="text-accent"
-      />
-      {/* Dots */}
-      {xs.map((x, i) => (
-        <circle key={i} cx={x} cy={ys[i]} r={3} className="fill-accent" />
-      ))}
-      {/* Min / max labels */}
-      <text x={8} y={height - 1} className="fill-ink-disabled" fontSize={9}>{minW}</text>
-      <text x={width - 8} y={8 - 3} className="fill-ink-disabled" fontSize={9} textAnchor="end">{maxW}</text>
-    </svg>
-  )
+/** Epley formula: weight × (1 + reps/30), rounded to nearest 0.5. */
+function epley(weight: number, reps: number): number {
+  return Math.round(weight * (1 + reps / 30) * 2) / 2
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ExerciseHistoryScreen() {
-  const { exerciseId } = useParams<{ exerciseId: string }>()
-  const [searchParams] = useSearchParams()
-  const templateId = searchParams.get('templateId') ?? ''
-  const navigate = useNavigate()
+  const { exerciseId }  = useParams<{ exerciseId: string }>()
+  const [searchParams]  = useSearchParams()
+  const templateId      = searchParams.get('templateId') ?? ''
+  const navigate        = useNavigate()
 
   const [exerciseName, setExerciseName] = useState('')
-  const [points, setPoints] = useState<DataPoint[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [points, setPoints]             = useState<DataPoint[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [error, setError]               = useState<string | null>(null)
+  const [metric, setMetric]             = useState<Metric>('weight')
 
   useEffect(() => {
-    if (!exerciseId) return
-    load(exerciseId)
+    if (exerciseId) load(exerciseId)
   }, [exerciseId])
 
   async function load(id: string) {
     try {
-      // Get exercise name
       const { data: exData } = await supabase
-        .from('exercise_templates')
-        .select('name')
-        .eq('id', id)
-        .single()
+        .from('exercise_templates').select('name').eq('id', id).single()
       if (exData) setExerciseName(exData.name)
 
-      // Get set logs with session date info — fetch more to build a useful history
-      const logs = await getSetLogsForExercise(id, 60)
-
-      // For each log, we need the session's completed_at. Fetch distinct session IDs.
+      const logs = await getSetLogsForExercise(id, 120)
       const sessionIds = [...new Set(logs.map(l => l.session_id))]
-      if (sessionIds.length === 0) { setPoints([]); return }
+      if (!sessionIds.length) { setPoints([]); return }
 
       const { data: sessions } = await supabase
         .from('sessions')
@@ -104,27 +70,38 @@ export default function ExerciseHistoryScreen() {
         .not('completed_at', 'is', null)
         .order('completed_at', { ascending: true })
 
-      if (!sessions) { setPoints([]); return }
+      if (!sessions?.length) { setPoints([]); return }
 
-      const sessionDateMap = new Map<string, string>(
-        sessions.map(s => [s.id, s.completed_at as string]),
-      )
-
-      // One data point per session: use top set (or working set) actual_weight
       const pts: DataPoint[] = []
-      for (const session of sessions) {
-        const sessionLogs = logs.filter(l => l.session_id === session.id)
-        const topSet = sessionLogs.find(l => l.set_type === 'top' && l.actual_weight !== null && l.completed)
-          ?? sessionLogs.find(l => l.set_type === 'working' && l.actual_weight !== null && l.completed)
-        if (!topSet?.actual_weight || !sessionDateMap.get(session.id)) continue
+      for (const sess of sessions) {
+        const sessLogs = logs.filter(l => l.session_id === sess.id)
+
+        // Primary set for weight / reps
+        const primarySet =
+          sessLogs.find(l => l.set_type === 'top'     && l.completed && l.actual_weight) ??
+          sessLogs.find(l => l.set_type === 'working' && l.completed && l.actual_weight)
+        if (!primarySet?.actual_weight) continue
+
+        // Volume: all working-type completed sets
+        const vol = sessLogs
+          .filter(l =>
+            (l.set_type === 'top' || l.set_type === 'working' ||
+             l.set_type === 'backoff' || l.set_type === 'amrap') &&
+            l.completed && l.actual_weight && l.actual_reps,
+          )
+          .reduce((s, l) => s + l.actual_weight! * l.actual_reps!, 0)
+
+        const reps = primarySet.actual_reps
         pts.push({
-          date: sessionDateMap.get(session.id)!,
-          weight: topSet.actual_weight,
-          reps: topSet.actual_reps,
-          sessionId: session.id,
+          date:      sess.completed_at!,
+          shortDate: shortDate(sess.completed_at!),
+          weight:    primarySet.actual_weight,
+          reps,
+          volume:    vol,
+          e1rm:      reps ? epley(primarySet.actual_weight, reps) : null,
+          sessionId: sess.id,
         })
       }
-
       setPoints(pts)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load history')
@@ -133,22 +110,71 @@ export default function ExerciseHistoryScreen() {
     }
   }
 
+  // ── Derived data ────────────────────────────────────────────────────────────
+
+  // For Est. 1RM, only use sessions where reps were logged
+  const e1rmPoints = points.filter(p => p.e1rm !== null)
+
+  // The active series for the chart
+  const activePoints = metric === 'e1rm' ? e1rmPoints : points
+
+  const chartValues: number[] = activePoints.map(p =>
+    metric === 'weight' ? p.weight :
+    metric === 'e1rm'   ? p.e1rm! :
+    p.volume,
+  )
+  const chartDates   = activePoints.map(p => p.shortDate)
+  const chartTooltips = activePoints.map(p => {
+    const line1 =
+      metric === 'weight' ? `${p.weight} lbs` :
+      metric === 'e1rm'   ? `~${p.e1rm} e1RM` :
+      `${p.volume.toLocaleString()} lbs vol`
+    const parts = [longDate(p.date)]
+    if (metric !== 'volume' && p.reps) parts.push(`${p.weight} lbs × ${p.reps}`)
+    else if (metric === 'volume' && p.reps) parts.push(`${p.weight} × ${p.reps}`)
+    return `${line1}\n${parts.join(' · ')}`
+  })
+
+  // Stats
+  const prWeight = points.length ? Math.max(...points.map(p => p.weight))                : null
+  const prE1rm   = e1rmPoints.length ? Math.max(...e1rmPoints.map(p => p.e1rm!))         : null
+  const prVolume = points.length ? Math.max(...points.map(p => p.volume))                : null
+  const last     = points[points.length - 1] ?? null
+
+  const displayPR =
+    metric === 'weight' ? prWeight :
+    metric === 'e1rm'   ? prE1rm :
+    prVolume
+
+  const displayLast =
+    metric === 'weight' ? last?.weight :
+    metric === 'e1rm'   ? last?.e1rm :
+    last?.volume
+
+  const prLabel  = metric === 'volume' ? 'Best vol' : 'PR'
+  const lastLabel = 'Last'
+  const unit =
+    metric === 'weight' ? ' lbs' :
+    metric === 'e1rm'   ? ' lbs' :
+    ' lbs'
+
+  function fmtStat(v: number | null | undefined): string {
+    if (v == null) return '—'
+    if (metric === 'volume' && v >= 1000) return `${(v / 1000).toFixed(1)}k`
+    return String(v)
+  }
+
   const backPath = templateId
     ? `/program/exercise/${exerciseId}?templateId=${templateId}`
     : `/program/exercise/${exerciseId}`
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   if (error) return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <p className="text-negative text-sm">{error}</p>
     </div>
   )
-
-  // PR = highest weight ever
-  const pr = points.length > 0 ? Math.max(...points.map(p => p.weight)) : null
-  // Last session
-  const last = points[points.length - 1] ?? null
-  // Number of sessions with data
-  const sessionCount = points.length
 
   return (
     <div className="min-h-screen">
@@ -168,7 +194,7 @@ export default function ExerciseHistoryScreen() {
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold text-ink truncate">{exerciseName || 'Exercise history'}</h1>
             {!loading && (
-              <p className="text-xs text-ink-secondary mt-0.5">{sessionCount} sessions logged</p>
+              <p className="text-xs text-ink-secondary mt-0.5">{points.length} sessions logged</p>
             )}
           </div>
         </div>
@@ -179,39 +205,66 @@ export default function ExerciseHistoryScreen() {
           </div>
         ) : points.length === 0 ? (
           <div className="bg-surface/60 border border-edge rounded-2xl p-6 text-center">
-            <p className="text-ink-secondary text-sm">No completed sets logged yet for this exercise.</p>
+            <p className="text-ink-secondary text-sm">No completed sets logged yet.</p>
           </div>
         ) : (
           <>
-            {/* Quick stats */}
+            {/* Metric tabs */}
+            <div className="flex bg-elevated border border-edge rounded-xl overflow-hidden">
+              {([
+                { key: 'weight', label: 'Weight' },
+                { key: 'e1rm',   label: 'Est. 1RM', disabled: !e1rmPoints.length },
+                { key: 'volume', label: 'Volume' },
+              ] as { key: Metric; label: string; disabled?: boolean }[]).map((tab, i) => (
+                <button
+                  key={tab.key}
+                  disabled={tab.disabled}
+                  onClick={() => setMetric(tab.key)}
+                  className={[
+                    'flex-1 py-2 text-xs font-semibold transition-colors',
+                    i > 0 ? 'border-l border-edge' : '',
+                    metric === tab.key
+                      ? 'bg-accent text-white'
+                      : tab.disabled
+                        ? 'text-ink-disabled cursor-not-allowed'
+                        : 'text-ink-secondary active:opacity-70',
+                  ].join(' ')}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Stats row */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-surface/80 border border-edge rounded-xl p-3 flex flex-col items-center gap-0.5 text-center">
-                <span className="text-lg font-bold text-ink tabular-nums">{last?.weight ?? '—'}</span>
-                <span className="text-xs text-ink-secondary">Last</span>
+                <span className="text-lg font-bold text-ink tabular-nums">
+                  {fmtStat(displayLast)}
+                </span>
+                <span className="text-xs text-ink-secondary">{lastLabel}</span>
               </div>
               <div className="bg-surface/80 border border-accent/25 rounded-xl p-3 flex flex-col items-center gap-0.5 text-center">
-                <span className="text-lg font-bold text-accent tabular-nums">{pr ?? '—'}</span>
-                <span className="text-xs text-ink-secondary">PR</span>
+                <span className="text-lg font-bold text-accent tabular-nums">
+                  {fmtStat(displayPR)}
+                </span>
+                <span className="text-xs text-ink-secondary">{prLabel}</span>
               </div>
               <div className="bg-surface/80 border border-edge rounded-xl p-3 flex flex-col items-center gap-0.5 text-center">
-                <span className="text-lg font-bold text-ink tabular-nums">{sessionCount}</span>
+                <span className="text-lg font-bold text-ink tabular-nums">{points.length}</span>
                 <span className="text-xs text-ink-secondary">Sessions</span>
               </div>
             </div>
 
-            {/* Sparkline chart */}
-            {points.length >= 2 && (
-              <div className="bg-surface/80 border border-edge rounded-2xl p-4">
-                <p className="text-xs font-semibold text-ink-disabled uppercase tracking-wide mb-3">
-                  Weight over time
-                </p>
-                <div className="w-full overflow-hidden">
-                  <Sparkline points={points} width={320} height={72} />
-                </div>
-                <div className="flex justify-between mt-2">
-                  <span className="text-xs text-ink-disabled">{formatShortDate(points[0].date)}</span>
-                  <span className="text-xs text-ink-disabled">{formatShortDate(points[points.length - 1].date)}</span>
-                </div>
+            {/* Chart */}
+            {activePoints.length >= 2 && (
+              <div className="bg-surface/80 border border-edge rounded-2xl px-3 pt-4 pb-3">
+                <LineChart
+                  values={chartValues}
+                  dates={chartDates}
+                  tooltips={chartTooltips}
+                  unit={unit}
+                  gradId={`ex-hist-${metric}`}
+                />
               </div>
             )}
 
@@ -221,7 +274,20 @@ export default function ExerciseHistoryScreen() {
                 Session log
               </p>
               {[...points].reverse().map((pt, i) => {
-                const isPR = pt.weight === pr
+                const isPR  = metric === 'weight' ? pt.weight === prWeight
+                            : metric === 'e1rm'   ? pt.e1rm   === prE1rm
+                            : pt.volume === prVolume
+                const mainVal =
+                  metric === 'weight' ? `${pt.weight} lbs` :
+                  metric === 'e1rm'   ? (pt.e1rm ? `~${pt.e1rm} lbs` : `${pt.weight} lbs`) :
+                  `${pt.volume.toLocaleString()} lbs`
+                const subVal =
+                  metric === 'weight'
+                    ? pt.reps ? `${pt.reps} reps` : ''
+                    : metric === 'e1rm'
+                      ? pt.reps ? `${pt.weight} × ${pt.reps}` : ''
+                      : pt.reps ? `${pt.weight} × ${pt.reps} + more` : ''
+
                 return (
                   <button
                     key={i}
@@ -230,9 +296,7 @@ export default function ExerciseHistoryScreen() {
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-ink tabular-nums">
-                          {pt.weight} lbs
-                        </span>
+                        <span className="text-sm font-semibold text-ink tabular-nums">{mainVal}</span>
                         {isPR && (
                           <span className="text-xs font-bold text-accent bg-accent/10 border border-accent/25 rounded px-1.5 py-0.5">
                             PR
@@ -240,10 +304,8 @@ export default function ExerciseHistoryScreen() {
                         )}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-ink-secondary">{formatShortDate(pt.date)}</span>
-                        {pt.reps != null && (
-                          <span className="text-xs text-ink-disabled">· {pt.reps} reps</span>
-                        )}
+                        <span className="text-xs text-ink-secondary">{shortDate(pt.date)}</span>
+                        {subVal && <span className="text-xs text-ink-disabled">· {subVal}</span>}
                       </div>
                     </div>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink-disabled shrink-0">
