@@ -3,6 +3,8 @@ import HomeScreen from './screens/HomeScreen'
 import WorkoutScreen from './screens/WorkoutScreen'
 import SummaryScreen from './screens/SummaryScreen'
 import ProgramScreen from './screens/ProgramScreen'
+import TemplateEditorScreen from './screens/TemplateEditorScreen'
+import ExerciseEditorScreen from './screens/ExerciseEditorScreen'
 import SessionsScreen from './screens/SessionsScreen'
 
 function App() {
@@ -13,6 +15,8 @@ function App() {
         <Route path="/workout/:sessionId" element={<WorkoutScreen />} />
         <Route path="/summary/:sessionId" element={<SummaryScreen />} />
         <Route path="/program" element={<ProgramScreen />} />
+        <Route path="/program/template/:templateId" element={<TemplateEditorScreen />} />
+        <Route path="/program/exercise/:exerciseId" element={<ExerciseEditorScreen />} />
         <Route path="/sessions" element={<SessionsScreen />} />
       </Routes>
     </BrowserRouter>

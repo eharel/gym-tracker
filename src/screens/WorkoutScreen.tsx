@@ -6,12 +6,13 @@ import {
   getExerciseNotes,
   getExerciseTemplates,
   getLastSessionForTemplate,
+  getSetLogsForExercise,
   getSetLogsForSession,
   getWorkoutTemplates,
   saveExerciseNote,
   updateSetLog,
 } from '../lib/db'
-import { calcBackoffWeight, calcWarmupWeight, calcDumbbellWarmup, initializeSession } from '../lib/calculations'
+import { calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, initializeSession } from '../lib/calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
 import RestTimer from '../components/RestTimer'
 
@@ -23,6 +24,7 @@ interface WorkoutData {
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
   lastSetLogs: SetLog[]
+  stalenessMap: Record<string, number>  // exerciseTemplateId → staleness count
 }
 
 interface NoteEntry {
@@ -314,6 +316,7 @@ function ExerciseCard({
   sets,
   prevSets,
   note,
+  staleness,
   skipped,
   onWeightChange,
   onRepsChange,
@@ -325,6 +328,7 @@ function ExerciseCard({
   sets: SetLog[]
   prevSets: SetLog[]
   note: NoteEntry
+  staleness: number
   skipped: boolean
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
@@ -373,9 +377,17 @@ function ExerciseCard({
         </div>
 
         <div className="flex-1 min-w-0">
-          <h3 className={`font-bold text-base leading-tight ${allDone ? 'text-ink-secondary' : 'text-ink'}`}>
-            {exercise.name}
-          </h3>
+          <div className="flex items-center gap-1.5">
+            <h3 className={`font-bold text-base leading-tight ${allDone ? 'text-ink-secondary' : 'text-ink'}`}>
+              {exercise.name}
+            </h3>
+            {staleness >= 3 && (
+              <span className="text-caution text-xs" title={`No progress in ${staleness} sessions`}>●</span>
+            )}
+            {staleness >= 1 && staleness < 3 && (
+              <span className="text-ink-disabled text-xs" title={`No progress in ${staleness} session${staleness > 1 ? 's' : ''}`}>●</span>
+            )}
+          </div>
           {collapsed ? (
             <span className="text-xs text-ink-disabled">
               {skipped ? 'Skipped' : `${completedCount}/${workingSets.length} sets`}
@@ -521,6 +533,16 @@ export default function WorkoutScreen() {
   const notesRef = useRef<Record<string, NoteEntry>>({})
   useEffect(() => { notesRef.current = notes }, [notes])
 
+  async function buildStalenessMap(exercises: ExerciseTemplate[]): Promise<Record<string, number>> {
+    const entries = await Promise.all(
+      exercises.map(async ex => {
+        const logs = await getSetLogsForExercise(ex.id, 20)
+        return [ex.id, calcStaleness(ex.id, logs)] as const
+      }),
+    )
+    return Object.fromEntries(entries)
+  }
+
   async function load() {
     try {
       let session: Session
@@ -547,7 +569,8 @@ export default function WorkoutScreen() {
         navigate(`/workout/${session.id}`, { replace: true })
 
         const exercises2 = await getExerciseTemplates(templateId)
-        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs })
+        const stalenessMap = await buildStalenessMap(exercises2)
+        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs, stalenessMap })
         setNotes({})
       } else {
         if (!sessionId) throw new Error('No session ID')
@@ -567,13 +590,16 @@ export default function WorkoutScreen() {
           ? await getSetLogsForSession(lastSession.id)
           : []
 
-        const existingNotes = await getExerciseNotes(sessionId)
+        const [existingNotes, stalenessMap] = await Promise.all([
+          getExerciseNotes(sessionId),
+          buildStalenessMap(exercises),
+        ])
         const notesMap: Record<string, NoteEntry> = {}
         existingNotes.forEach(n => {
           notesMap[n.exercise_template_id] = { id: n.id, text: n.note }
         })
 
-        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs })
+        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, stalenessMap })
         setNotes(notesMap)
       }
     } catch (e) {
@@ -786,6 +812,7 @@ export default function WorkoutScreen() {
         sets={exerciseSets}
         prevSets={prevExerciseSets}
         note={notes[exercise.id] ?? { text: '' }}
+        staleness={data!.stalenessMap[exercise.id] ?? 0}
         skipped={skipped.has(exercise.id)}
         onWeightChange={handleWeightChange}
         onRepsChange={handleRepsChange}
