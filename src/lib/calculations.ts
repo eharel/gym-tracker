@@ -118,6 +118,21 @@ function getLastWeightForExercise(
   return working?.actual_weight ?? null
 }
 
+/** Returns the actual_reps logged for a specific set in the previous session, or null if none. */
+function getPrevRepsForSet(
+  exerciseTemplateId: string,
+  setType: NewSetLog['set_type'],
+  setIndex: number,
+  lastSetLogs: SetLog[],
+): number | null {
+  return lastSetLogs.find(
+    l =>
+      l.exercise_template_id === exerciseTemplateId &&
+      l.set_type === setType &&
+      l.set_index === setIndex,
+  )?.actual_reps ?? null
+}
+
 /**
  * Generates pre-populated NewSetLog rows for a new session.
  *
@@ -146,9 +161,10 @@ export function initializeSession(
         ex.warmup_reps
       ) {
         for (let i = 0; i < ex.warmup_percentages.length; i++) {
+          const idx = setIndex++
           result.push({
             exercise_template_id: ex.id,
-            set_index: setIndex++,
+            set_index: idx,
             set_type: 'warmup',
             target_weight: calcWarmupWeight(
               workingWeight,
@@ -157,15 +173,16 @@ export function initializeSession(
             ),
             actual_weight: null,
             target_reps: String(ex.warmup_reps[i]),
-            actual_reps: null,
+            actual_reps: getPrevRepsForSet(ex.id, 'warmup', idx, lastSetLogs),
             is_weight_override: false,
             completed: false,
           })
         }
       } else if (ex.warmup_rule === 'dumbbell_percentage') {
+        const idx = setIndex++
         result.push({
           exercise_template_id: ex.id,
-          set_index: setIndex++,
+          set_index: idx,
           set_type: 'warmup',
           target_weight: calcDumbbellWarmup(
             workingWeight,
@@ -174,19 +191,20 @@ export function initializeSession(
           ),
           actual_weight: null,
           target_reps: String(ex.warmup_db_reps ?? 10),
-          actual_reps: null,
+          actual_reps: getPrevRepsForSet(ex.id, 'warmup', idx, lastSetLogs),
           is_weight_override: false,
           completed: false,
         })
       } else if (ex.warmup_rule === 'fixed_weight') {
+        const idx = setIndex++
         result.push({
           exercise_template_id: ex.id,
-          set_index: setIndex++,
+          set_index: idx,
           set_type: 'warmup',
           target_weight: ex.warmup_fixed_weight ?? 0,
           actual_weight: null,
           target_reps: String(ex.warmup_fixed_reps ?? 10),
-          actual_reps: null,
+          actual_reps: getPrevRepsForSet(ex.id, 'warmup', idx, lastSetLogs),
           is_weight_override: false,
           completed: false,
         })
@@ -195,14 +213,15 @@ export function initializeSession(
 
     // Working sets
     if (ex.working_set_type === 'top_set') {
+      const idx = setIndex++
       result.push({
         exercise_template_id: ex.id,
-        set_index: setIndex++,
+        set_index: idx,
         set_type: 'top',
         target_weight: workingWeight,
         actual_weight: null,
         target_reps: ex.working_rep_target,
-        actual_reps: null,
+        actual_reps: getPrevRepsForSet(ex.id, 'top', idx, lastSetLogs),
         is_weight_override: false,
         completed: false,
       })
@@ -215,14 +234,15 @@ export function initializeSession(
           ex.rounding_increment,
         )
         for (let i = 0; i < ex.backoff_set_count; i++) {
+          const idx = setIndex++
           result.push({
             exercise_template_id: ex.id,
-            set_index: setIndex++,
+            set_index: idx,
             set_type: 'backoff',
             target_weight: backoffWeight,
             actual_weight: null,
             target_reps: ex.backoff_rep_target,
-            actual_reps: null,
+            actual_reps: getPrevRepsForSet(ex.id, 'backoff', idx, lastSetLogs),
             is_weight_override: false,
             completed: false,
           })
@@ -231,14 +251,15 @@ export function initializeSession(
     } else {
       const setType = ex.working_set_type === 'amrap' ? 'amrap' : 'working'
       for (let i = 0; i < ex.working_set_count; i++) {
+        const idx = setIndex++
         result.push({
           exercise_template_id: ex.id,
-          set_index: setIndex++,
+          set_index: idx,
           set_type: setType,
           target_weight: workingWeight,
           actual_weight: null,
           target_reps: ex.working_rep_target,
-          actual_reps: null,
+          actual_reps: getPrevRepsForSet(ex.id, setType, idx, lastSetLogs),
           is_weight_override: false,
           completed: false,
         })

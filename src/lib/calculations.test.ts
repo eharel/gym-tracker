@@ -467,9 +467,29 @@ describe('initializeSession', () => {
     sets.forEach(s => {
       expect(s.completed).toBe(false)
       expect(s.actual_weight).toBeNull()
-      expect(s.actual_reps).toBeNull()
       expect(s.is_weight_override).toBe(false)
     })
+  })
+
+  it('pre-fills actual_reps from the previous session by matching set_type + set_index', () => {
+    const squat = makeExerciseTemplate()
+    // Build realistic last-session logs with correct set_index values:
+    // 4 warmups (0-3) + top (4) + backoff (5)
+    const lastSetLogs = [
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 0, actual_reps: 10 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 1, actual_reps: 5 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 2, actual_reps: 3 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 3, actual_reps: 1 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'top',    set_index: 4, actual_weight: 290, actual_reps: 3 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'backoff', set_index: 5, actual_reps: 9 }),
+    ]
+
+    const sets = initializeSession([squat], lastSetLogs)
+
+    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 0)?.actual_reps).toBe(10)
+    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 3)?.actual_reps).toBe(1)
+    expect(sets.find(s => s.set_type === 'top')?.actual_reps).toBe(3)
+    expect(sets.find(s => s.set_type === 'backoff')?.actual_reps).toBe(9)
   })
 
   it('sorts exercises by position before generating sets', () => {

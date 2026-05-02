@@ -168,6 +168,16 @@ function SetRow({
     numericWeight !== null &&
     numericWeight < log.target_weight
 
+  // Reps are pre-filled from the previous session. Track whether the user has
+  // touched the field yet: prefilled = muted + show target range; edited = normal + show delta.
+  const [isPrefilled, setIsPrefilled] = useState(
+    () =>
+      !log.completed &&
+      prevLog !== null &&
+      log.actual_reps !== null &&
+      log.actual_reps === prevLog.actual_reps,
+  )
+
   const isBar = isWarmup && log.target_weight === 45
   // Per-set plate breakdown — skip the "Bar" row (no plates needed) and blank weights
   const plateStr = isBarbell && !isBar && numericWeight ? plateBreakdown(numericWeight) : null
@@ -241,7 +251,7 @@ function SetRow({
         </div>
       </div>
 
-      {/* Reps column — plain input, no steppers (small integers are easy to type directly) */}
+      {/* Reps column — plain input; pre-filled from prev session shown in muted style */}
       <div className="flex-1 flex flex-col items-center gap-0.5">
         <div className="w-full">
           <input
@@ -249,24 +259,30 @@ function SetRow({
             inputMode="numeric"
             step={1}
             value={log.actual_reps ?? ''}
-            onChange={e => onRepsChange(log.id, e.target.value)}
+            onFocus={() => setIsPrefilled(false)}
+            onChange={e => { setIsPrefilled(false); onRepsChange(log.id, e.target.value) }}
             disabled={completed}
             className={`w-full text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
               ${completed
                 ? 'border-transparent text-ink-disabled bg-transparent'
-                : isWarmup
-                  ? 'border-edge text-ink-secondary focus:border-edge-strong'
-                  : 'border-edge text-ink focus:border-accent'
+                : isPrefilled
+                  ? 'border-edge/50 text-ink-disabled'
+                  : isWarmup
+                    ? 'border-edge text-ink-secondary focus:border-edge-strong'
+                    : 'border-edge text-ink focus:border-accent'
               }`}
           />
         </div>
-        {/* Sub-label: target reps range then delta once entered */}
+        {/* Sub-label: target range while prefilled or blank; delta once user has edited */}
         <div className="h-4 flex items-center justify-center">
-          {!isWarmup && log.actual_reps !== null
-            ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} />
-            : log.target_reps && !completed
-              ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
-              : null
+          {completed ? null
+            : isPrefilled || log.actual_reps === null
+              ? log.target_reps
+                ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
+                : null
+              : !isWarmup
+                ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} />
+                : null
           }
         </div>
       </div>
