@@ -116,6 +116,7 @@ function SetRow({
   prevLog,
   weightStep,
   isBarbell,
+  topSetWeight,
   onWeightChange,
   onRepsChange,
   onToggleComplete,
@@ -124,6 +125,7 @@ function SetRow({
   prevLog: SetLog | null
   weightStep: number
   isBarbell: boolean
+  topSetWeight: number | null
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
   onToggleComplete: (id: string) => void
@@ -183,6 +185,11 @@ function SetRow({
   const isBar = isWarmup && log.target_weight === 45
   // Per-set plate breakdown — skip the "Bar" row (no plates needed) and blank weights
   const plateStr = isBarbell && !isBar && numericWeight ? plateBreakdown(numericWeight) : null
+  // Warmup percentage of working/top-set weight
+  const warmupPct =
+    isWarmup && isBarbell && topSetWeight && numericWeight
+      ? Math.round((numericWeight / topSetWeight) * 100)
+      : null
 
   return (
     <div
@@ -197,11 +204,11 @@ function SetRow({
         </span>
       </div>
 
-      {/* Weight column */}
-      <div className="flex-1 flex flex-col items-center gap-0.5">
+      {/* Weight column — slightly narrower than reps (steppers take space) */}
+      <div className="flex-[2] min-w-0 flex flex-col items-center gap-0.5">
         {isBar ? (
           <div className="w-full flex items-center gap-1">
-            {!completed && <div className="w-6 h-6 shrink-0" />}
+            {!completed && <div className="w-5 h-5 shrink-0" />}
             <span className={`flex-1 block text-center text-sm font-medium rounded-lg py-2 border
               ${completed
                 ? 'bg-transparent border-transparent text-ink-disabled'
@@ -209,7 +216,7 @@ function SetRow({
               }`}>
               Bar
             </span>
-            {!completed && <div className="w-6 h-6 shrink-0" />}
+            {!completed && <div className="w-5 h-5 shrink-0" />}
           </div>
         ) : (
           <div className="w-full flex items-center gap-1">
@@ -239,22 +246,23 @@ function SetRow({
             )}
           </div>
         )}
-        {/* Sub-label: delta + plate breakdown (stacked); below-target warning for warmup */}
+        {/* Sub-label: delta · plate breakdown · warmup % · below-target warning */}
         <div className="min-h-4 flex flex-col items-center justify-center gap-px">
           {!isWarmup && (
             <DeltaBadge current={numericWeight} previous={prevLog?.actual_weight ?? null} />
           )}
-          {plateStr && (
-            <span className="text-xs text-ink-disabled tabular-nums leading-tight">{plateStr}</span>
-          )}
-          {isWarmup && isBelowTarget && (
+          {isWarmup && isBelowTarget ? (
             <span className="text-xs text-caution tabular-nums">target {log.target_weight}</span>
-          )}
+          ) : (plateStr || warmupPct !== null) ? (
+            <span className="text-xs text-ink-disabled tabular-nums leading-tight">
+              {[plateStr, warmupPct !== null ? `${warmupPct}%` : null].filter(Boolean).join(' · ')}
+            </span>
+          ) : null}
         </div>
       </div>
 
-      {/* Reps column — plain input; pre-filled from prev session shown in muted style */}
-      <div className="flex-1 flex flex-col items-center gap-0.5">
+      {/* Reps column — wider tap target */}
+      <div className="flex-[3] min-w-0 flex flex-col items-center gap-0.5">
         <div className="w-full">
           <input
             type="number"
@@ -275,16 +283,19 @@ function SetRow({
               }`}
           />
         </div>
-        {/* Sub-label: target range while prefilled or blank; delta once user has edited */}
+        {/* Sub-label: target range while active; delta always (including after completion) */}
         <div className="h-4 flex items-center justify-center">
-          {completed ? null
-            : isPrefilled || log.actual_reps === null
-              ? log.target_reps
-                ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
-                : null
-              : !isWarmup
+          {completed
+            ? (!isWarmup
                 ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} />
-                : null
+                : null)
+            : isPrefilled || log.actual_reps === null
+              ? (log.target_reps
+                  ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
+                  : null)
+              : (!isWarmup
+                  ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} />
+                  : null)
           }
         </div>
       </div>
@@ -462,6 +473,7 @@ function ExerciseCard({
                 prevLog={prevSets.find(p => p.set_index === log.set_index && p.set_type === log.set_type) ?? null}
                 weightStep={exercise.rounding_increment}
                 isBarbell={isBarbell}
+                topSetWeight={workingWeight}
                 onWeightChange={onWeightChange}
                 onRepsChange={onRepsChange}
                 onToggleComplete={onToggleComplete}
