@@ -83,6 +83,22 @@ export async function getCompletedSessions(programId: string): Promise<Session[]
   return data
 }
 
+/** Returns the most recent N completed sessions for a template, newest-first. */
+export async function getRecentCompletedSessionsForTemplate(
+  workoutTemplateId: string,
+  limit = 10,
+): Promise<Session[]> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('workout_template_id', workoutTemplateId)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return data ?? []
+}
+
 /** Returns the most recent completed session for a specific workout template. */
 export async function getLastSessionForTemplate(
   workoutTemplateId: string,

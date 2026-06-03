@@ -1,5 +1,98 @@
 import type { ExerciseTemplate, NewSetLog, Session, SetLog, WorkoutTemplate } from '../types'
 
+// ─── Comeback detection ─────────────────────────────────────────────────────
+
+export interface ComebackInfo {
+  /** The session whose weights are the recovery target. */
+  benchmarkSessionId: string
+  /** Days between the benchmark session and the first session after the gap. */
+  gapDays: number
+  /** How many comeback sessions have already been completed (0 = first one). */
+  comebackSessionsDone: number
+  /** Total comeback sessions prescribed before returning to full weight. */
+  comebackSessionsTotal: number
+  /** Weight multiplier to apply this session (0.65 – 1.0). */
+  factor: number
+  /** Convenience: sessionsTotal − sessionsDone. */
+  sessionsRemaining: number
+}
+
+function daysBetween(earlier: string | Date, later: string | Date): number {
+  return (new Date(later).getTime() - new Date(earlier).getTime()) / 86_400_000
+}
+
+/** Returns total comeback sessions and starting weight factor for a given gap. */
+function comebackParams(gapDays: number): { total: number; startFactor: number } {
+  if (gapDays < 21) return { total: 2, startFactor: 0.85 }
+  if (gapDays < 42) return { total: 3, startFactor: 0.75 }
+  if (gapDays < 84) return { total: 4, startFactor: 0.65 }
+  return                    { total: 4, startFactor: 0.60 }
+}
+
+/**
+ * Linearly interpolates from startFactor → 1.0 over `total` sessions,
+ * so the final comeback session always lands at full benchmark weight.
+ */
+function comebackFactor(gapDays: number, sessionsDone: number): number {
+  const { total, startFactor } = comebackParams(gapDays)
+  if (sessionsDone >= total) return 1
+  // total−1 steps from startFactor to 1.0; last step = 1.0
+  const t = total === 1 ? 1 : sessionsDone / (total - 1)
+  return startFactor + (1 - startFactor) * t
+}
+
+/**
+ * Scans recent *completed* sessions (newest-first) to determine whether the
+ * next session should be a comeback session.
+ *
+ * @param sessions  Completed sessions for this workout template, newest-first.
+ * @param now       Treated as "start of the new session" (injectable for tests).
+ */
+export function detectComeback(
+  sessions: Session[],
+  now: Date = new Date(),
+): ComebackInfo | null {
+  if (sessions.length === 0) return null
+
+  const GAP_THRESHOLD = 14 // days
+
+  // ── Case 1: gap is between the last session and right now ──────────────────
+  const daysSinceLast = daysBetween(sessions[0].completed_at!, now)
+  if (daysSinceLast >= GAP_THRESHOLD) {
+    const { total, startFactor } = comebackParams(daysSinceLast)
+    return {
+      benchmarkSessionId:    sessions[0].id,
+      gapDays:               Math.round(daysSinceLast),
+      comebackSessionsDone:  0,
+      comebackSessionsTotal: total,
+      factor:                startFactor,
+      sessionsRemaining:     total,
+    }
+  }
+
+  // ── Case 2: we're in the middle of a comeback ──────────────────────────────
+  // sessions[i-1] is a post-gap session; sessions[i] is the benchmark.
+  for (let i = 1; i < sessions.length; i++) {
+    const gap = daysBetween(sessions[i].completed_at!, sessions[i - 1].started_at)
+    if (gap >= GAP_THRESHOLD) {
+      const done = i // i sessions completed since the gap
+      const { total } = comebackParams(gap)
+      if (done >= total) return null // comeback already complete
+      const factor = comebackFactor(gap, done)
+      return {
+        benchmarkSessionId:    sessions[i].id,
+        gapDays:               Math.round(gap),
+        comebackSessionsDone:  done,
+        comebackSessionsTotal: total,
+        factor,
+        sessionsRemaining:     total - done,
+      }
+    }
+  }
+
+  return null
+}
+
 // ─── Weight calculations ────────────────────────────────────────────────────
 
 export function calcWarmupWeight(
@@ -105,48 +198,64 @@ export function getNextWorkoutTemplate(
 
 /**
  * Returns the suggested starting weight for the next session of a given exercise.
- * If the previous session earned progression (hit the top of the rep range for all
- * required sets), the weight is automatically bumped by the exercise's increment.
+ *
+ * Normal mode  – checks whether progression was earned and bumps the weight.
+ * Comeback mode – applies `factor` to the benchmark weight; skips progression.
  */
-function getSuggestedWeight(ex: ExerciseTemplate, lastSetLogs: SetLog[]): number | null {
+function getSuggestedWeight(
+  ex: ExerciseTemplate,
+  lastSetLogs: SetLog[],
+  factor?: number,       // when set, we're in comeback mode
+): number | null {
+  // ── Get raw benchmark weight (no progression) ──────────────────────────────
+  let base: number | null = null
+
   if (ex.working_set_type === 'top_set') {
     const topSet = lastSetLogs.find(
       l => l.exercise_template_id === ex.id && l.set_type === 'top' && l.completed,
     )
     if (!topSet?.actual_weight) return null
-    if (
-      topSet.actual_reps !== null &&
-      ex.working_rep_target &&
-      hasEarnedProgression(ex.working_rep_target, topSet.actual_reps)
-    ) {
-      return topSet.actual_weight + ex.weight_increment
+    base = topSet.actual_weight
+
+    // Normal mode: check progression
+    if (factor === undefined &&
+        topSet.actual_reps !== null &&
+        ex.working_rep_target &&
+        hasEarnedProgression(ex.working_rep_target, topSet.actual_reps)) {
+      base = topSet.actual_weight + ex.weight_increment
     }
-    return topSet.actual_weight
-  }
-
-  // straight_sets or amrap
-  const workingSets = lastSetLogs.filter(
-    l =>
-      l.exercise_template_id === ex.id &&
-      (l.set_type === 'working' || l.set_type === 'amrap') &&
-      l.completed &&
-      l.actual_weight !== null,
-  )
-  if (workingSets.length === 0) return null
-  const lastWeight = workingSets[0].actual_weight!
-
-  if (
-    ex.working_set_type === 'straight_sets' &&
-    ex.working_rep_target &&
-    workingSets.length >= ex.working_set_count &&
-    workingSets.every(
-      l => l.actual_reps !== null && hasEarnedProgression(ex.working_rep_target!, l.actual_reps!),
+  } else {
+    // straight_sets or amrap
+    const workingSets = lastSetLogs.filter(
+      l =>
+        l.exercise_template_id === ex.id &&
+        (l.set_type === 'working' || l.set_type === 'amrap') &&
+        l.completed &&
+        l.actual_weight !== null,
     )
-  ) {
-    return lastWeight + ex.weight_increment
+    if (workingSets.length === 0) return null
+    base = workingSets[0].actual_weight!
+
+    // Normal mode: check progression for straight sets
+    if (
+      factor === undefined &&
+      ex.working_set_type === 'straight_sets' &&
+      ex.working_rep_target &&
+      workingSets.length >= ex.working_set_count &&
+      workingSets.every(
+        l => l.actual_reps !== null && hasEarnedProgression(ex.working_rep_target!, l.actual_reps!),
+      )
+    ) {
+      base = base + ex.weight_increment
+    }
   }
 
-  return lastWeight
+  // ── Comeback mode: scale and round ─────────────────────────────────────────
+  if (factor !== undefined && base !== null) {
+    return Math.round((base * factor) / ex.rounding_increment) * ex.rounding_increment
+  }
+
+  return base
 }
 
 /** Returns the actual_reps logged for a specific set in the previous session, or null if none. */
@@ -168,21 +277,22 @@ function getPrevRepsForSet(
  * Generates pre-populated NewSetLog rows for a new session.
  *
  * - exerciseTemplates: all exercises for the workout, sorted by position
- * - lastSetLogs: set_logs from the most recent completed session of the same
- *   workout template. Pass [] for the first-ever session of a given workout —
- *   target weights will be null and the UI should prompt the user to confirm
- *   starting weights.
+ * - lastSetLogs: set_logs from the reference session (most recent in normal
+ *   mode; benchmark session in comeback mode). Pass [] for first-ever session.
+ * - comebackFactor: when provided, skips progression and scales the benchmark
+ *   weight by this multiplier (0 < factor ≤ 1).
  */
 export function initializeSession(
   exerciseTemplates: ExerciseTemplate[],
   lastSetLogs: SetLog[],
+  comebackFactor?: number,
 ): NewSetLog[] {
   const result: NewSetLog[] = []
   const sorted = [...exerciseTemplates].sort((a, b) => a.position - b.position)
 
   for (const ex of sorted) {
     let setIndex = 0
-    const workingWeight = getSuggestedWeight(ex, lastSetLogs)
+    const workingWeight = getSuggestedWeight(ex, lastSetLogs, comebackFactor)
 
     // Warmup sets
     if (ex.warmup_rule !== 'none' && workingWeight !== null) {

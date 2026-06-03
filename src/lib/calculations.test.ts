@@ -4,6 +4,7 @@ import {
   calcDumbbellWarmup,
   calcStaleness,
   calcWarmupWeight,
+  detectComeback,
   getNextWorkoutTemplate,
   hasEarnedProgression,
   initializeSession,
@@ -341,7 +342,8 @@ describe('initializeSession', () => {
   it('generates correct warmup + top + backoff sets for a percentage_of_top_set exercise', () => {
     const squat = makeExerciseTemplate() // Squat, top set 290, backoff 81%
     const lastSetLogs = [
-      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'top', actual_weight: 290 }),
+      // actual_reps: 3 → below the '2-4' ceiling, so no auto-progression
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'top', actual_weight: 290, actual_reps: 3 }),
     ]
 
     const sets = initializeSession([squat], lastSetLogs)
@@ -505,5 +507,113 @@ describe('initializeSession', () => {
     // Squat (position 0) should come first
     expect(sets[0].exercise_template_id).toBe('b')
     expect(sets[1].exercise_template_id).toBe('a')
+  })
+})
+
+// ─── detectComeback ──────────────────────────────────────────────────────────
+
+describe('detectComeback', () => {
+  function sessAt(daysAgo: number, anchor: Date, id: string): Session {
+    const d = new Date(anchor)
+    d.setDate(d.getDate() - daysAgo)
+    return makeSession({ id, started_at: d.toISOString(), completed_at: d.toISOString() })
+  }
+
+  it('returns null for an empty session list', () => {
+    expect(detectComeback([], new Date())).toBeNull()
+  })
+
+  it('returns null when the last session was 5 days ago', () => {
+    const now = new Date()
+    expect(detectComeback([sessAt(5, now, 's1')], now)).toBeNull()
+  })
+
+  it('returns null when the last session was 13 days ago (just under threshold)', () => {
+    const now = new Date()
+    expect(detectComeback([sessAt(13, now, 's1')], now)).toBeNull()
+  })
+
+  it('detects first comeback session after a 20-day gap', () => {
+    const now = new Date()
+    const result = detectComeback([sessAt(20, now, 'benchmark')], now)
+    expect(result).not.toBeNull()
+    expect(result!.benchmarkSessionId).toBe('benchmark')
+    expect(result!.comebackSessionsDone).toBe(0)
+    expect(result!.comebackSessionsTotal).toBe(2)
+    expect(result!.factor).toBeCloseTo(0.85)
+    expect(result!.sessionsRemaining).toBe(2)
+  })
+
+  it('detects first comeback after a 30-day gap', () => {
+    const now = new Date()
+    const result = detectComeback([sessAt(30, now, 'b')], now)
+    expect(result!.comebackSessionsTotal).toBe(3)
+    expect(result!.factor).toBeCloseTo(0.75)
+  })
+
+  it('detects second session of a 3-session comeback', () => {
+    const now = new Date()
+    const sessions = [sessAt(3, now, 'comeback-1'), sessAt(34, now, 'benchmark')]
+    const result = detectComeback(sessions, now)
+    expect(result!.benchmarkSessionId).toBe('benchmark')
+    expect(result!.comebackSessionsDone).toBe(1)
+    expect(result!.comebackSessionsTotal).toBe(3)
+    expect(result!.factor).toBeCloseTo(0.875)
+    expect(result!.sessionsRemaining).toBe(2)
+  })
+
+  it('returns null when all comeback sessions are complete', () => {
+    const now = new Date()
+    const sessions = [
+      sessAt(1,  now, 'c3'),
+      sessAt(4,  now, 'c2'),
+      sessAt(7,  now, 'c1'),
+      sessAt(35, now, 'benchmark'),
+    ]
+    expect(detectComeback(sessions, now)).toBeNull()
+  })
+
+  it('does not flag consistently weekly sessions as a gap', () => {
+    const now = new Date()
+    const sessions = [sessAt(7, now, 's4'), sessAt(14, now, 's3'), sessAt(21, now, 's2'), sessAt(28, now, 's1')]
+    expect(detectComeback(sessions, now)).toBeNull()
+  })
+
+  it('comeback factor reaches 1.0 on the final comeback session', () => {
+    const now = new Date()
+    const sessions = [sessAt(3, now, 'c2'), sessAt(6, now, 'c1'), sessAt(36, now, 'benchmark')]
+    const result = detectComeback(sessions, now)
+    expect(result!.comebackSessionsDone).toBe(2)
+    expect(result!.factor).toBeCloseTo(1.0)
+  })
+
+  it('initializeSession applies comeback factor and skips auto-progression', () => {
+    const ex = makeExerciseTemplate({
+      id: 'sq',
+      working_set_type: 'top_set',
+      working_rep_target: '2-4',
+      weight_increment: 5,
+      rounding_increment: 5,
+      warmup_rule: 'none',
+      warmup_percentages: null,
+      warmup_reps: null,
+      backoff_set_count: 0,
+    })
+    // benchmark top set 200 lbs × 4 reps (would normally earn +5 progression)
+    const benchLog = makeSetLog({
+      exercise_template_id: 'sq',
+      set_type: 'top',
+      actual_weight: 200,
+      actual_reps: 4,
+      completed: true,
+    })
+
+    // comeback at 75%: 200 × 0.75 = 150 (already a multiple of 5)
+    const cbSets = initializeSession([ex], [benchLog], 0.75)
+    expect(cbSets.find(s => s.set_type === 'top')!.target_weight).toBe(150)
+
+    // normal mode: 200 + 5 progression = 205
+    const normalSets = initializeSession([ex], [benchLog])
+    expect(normalSets.find(s => s.set_type === 'top')!.target_weight).toBe(205)
   })
 })

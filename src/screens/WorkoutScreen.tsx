@@ -5,14 +5,15 @@ import {
   createSetLogs,
   getExerciseNotes,
   getExerciseTemplates,
-  getLastSessionForTemplate,
+  getRecentCompletedSessionsForTemplate,
   getSetLogsForExercise,
   getSetLogsForSession,
   getWorkoutTemplates,
   saveExerciseNote,
   updateSetLog,
 } from '../lib/db'
-import { calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, initializeSession } from '../lib/calculations'
+import { calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, detectComeback, initializeSession } from '../lib/calculations'
+import type { ComebackInfo } from '../lib/calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
 import RestTimer from '../components/RestTimer'
 
@@ -23,8 +24,9 @@ interface WorkoutData {
   template: WorkoutTemplate
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
-  lastSetLogs: SetLog[]
-  stalenessMap: Record<string, number>  // exerciseTemplateId → staleness count
+  lastSetLogs: SetLog[]           // benchmark logs (pre-gap during comeback)
+  stalenessMap: Record<string, number>
+  comeback: ComebackInfo | null
 }
 
 interface NoteEntry {
@@ -525,6 +527,52 @@ function CollapsibleBlock({ title, text }: { title: string; text: string }) {
   )
 }
 
+// ─── Comeback banner ──────────────────────────────────────────────────────────
+
+function ComebackBanner({ info, onDismiss }: { info: ComebackInfo; onDismiss: () => void }) {
+  const session = info.comebackSessionsDone + 1
+  const total   = info.comebackSessionsTotal
+  const pct     = Math.round(info.factor * 100)
+  const last    = info.sessionsRemaining === 1
+
+  return (
+    <div className="bg-caution/10 border border-caution/30 rounded-2xl p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-caution">
+            Coming back · {info.gapDays} days off
+          </p>
+          <p className="text-xs text-ink-secondary mt-0.5">
+            Session {session} of {total} · weights at {pct}%
+            {last ? ' · back to full next session' : ''}
+          </p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="w-6 h-6 flex items-center justify-center text-ink-disabled active:opacity-60 shrink-0"
+          aria-label="Dismiss"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Progress pips */}
+      <div className="flex gap-1.5">
+        {Array.from({ length: total }, (_, i) => (
+          <div
+            key={i}
+            className={`h-1 flex-1 rounded-full transition-colors ${
+              i < session ? 'bg-caution' : 'bg-edge'
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function WorkoutScreen() {
@@ -538,6 +586,7 @@ export default function WorkoutScreen() {
   const [completing, setCompleting] = useState(false)
   const [notes, setNotes] = useState<Record<string, NoteEntry>>({})
   const [restSignal, setRestSignal] = useState(0)
+  const [comebackDismissed, setComebackDismissed] = useState(false)
 
   const pendingUpdates = useRef<Map<string, Partial<SetLog>>>(new Map())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -572,18 +621,28 @@ export default function WorkoutScreen() {
         template = templates.find(t => t.id === templateId) ?? templates[0]
 
         const exercises = await getExerciseTemplates(templateId)
-        const lastSession = await getLastSessionForTemplate(templateId)
-        const lastLogs = lastSession ? await getSetLogsForSession(lastSession.id) : []
+
+        // ── Comeback detection ─────────────────────────────────────────────
+        const recentSessions = await getRecentCompletedSessionsForTemplate(templateId, 10)
+        const comeback = detectComeback(recentSessions)
+
+        let lastLogs: SetLog[]
+        if (comeback) {
+          // Use benchmark session's logs as the weight reference
+          lastLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
+        } else {
+          lastLogs = recentSessions[0] ? await getSetLogsForSession(recentSessions[0].id) : []
+        }
 
         session = await createSession(templateId)
-        const newLogs = initializeSession(exercises, lastLogs)
+        const newLogs = initializeSession(exercises, lastLogs, comeback?.factor)
         setLogs = await createSetLogs(session.id, newLogs)
 
         navigate(`/workout/${session.id}`, { replace: true })
 
         const exercises2 = await getExerciseTemplates(templateId)
         const stalenessMap = await buildStalenessMap(exercises2)
-        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs, stalenessMap })
+        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback })
         setNotes({})
       } else {
         if (!sessionId) throw new Error('No session ID')
@@ -598,10 +657,17 @@ export default function WorkoutScreen() {
         const exercises = await getExerciseTemplates(template.id)
         setLogs = await getSetLogsForSession(sessionId)
 
-        const lastSession = await getLastSessionForTemplate(template.id)
-        const lastLogs = lastSession && lastSession.id !== sessionId
-          ? await getSetLogsForSession(lastSession.id)
-          : []
+        // ── Comeback detection (resume path) ──────────────────────────────
+        const recentSessions = await getRecentCompletedSessionsForTemplate(template.id, 10)
+        const comeback = detectComeback(recentSessions)
+
+        let lastLogs: SetLog[]
+        if (comeback) {
+          lastLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
+        } else {
+          const firstRecent = recentSessions.find(s => s.id !== sessionId)
+          lastLogs = firstRecent ? await getSetLogsForSession(firstRecent.id) : []
+        }
 
         const [existingNotes, stalenessMap] = await Promise.all([
           getExerciseNotes(sessionId),
@@ -612,7 +678,7 @@ export default function WorkoutScreen() {
           notesMap[n.exercise_template_id] = { id: n.id, text: n.note }
         })
 
-        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, stalenessMap })
+        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback })
         setNotes(notesMap)
       }
     } catch (e) {
@@ -863,6 +929,14 @@ export default function WorkoutScreen() {
             </p>
           </div>
         </div>
+
+        {/* Comeback banner */}
+        {data.comeback && !comebackDismissed && (
+          <ComebackBanner
+            info={data.comeback}
+            onDismiss={() => setComebackDismissed(true)}
+          />
+        )}
 
         {/* Warmup */}
         {template.warmup_text && (
