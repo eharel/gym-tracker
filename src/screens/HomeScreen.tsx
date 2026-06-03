@@ -85,7 +85,7 @@ function NextWorkoutCard({
         onClick={onBegin}
         className="w-full bg-accent hover:bg-accent/90 text-white font-bold rounded-xl py-3.5 min-h-touch transition-colors active:scale-[0.98] transition-transform text-base tracking-wide shadow-card"
       >
-        Begin Workout
+        Preview Workout
       </button>
     </div>
   )
@@ -212,7 +212,7 @@ export default function HomeScreen() {
   }
 
   function handleBegin() {
-    navigate(`/workout/new?template=${data?.nextTemplate.id}`)
+    navigate(`/workout/preview?template=${data?.nextTemplate.id}`)
   }
 
   if (error) {

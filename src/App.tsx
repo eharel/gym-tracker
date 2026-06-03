@@ -8,6 +8,7 @@ import ExerciseEditorScreen from './screens/ExerciseEditorScreen'
 import SessionsScreen from './screens/SessionsScreen'
 import SessionDetailScreen from './screens/SessionDetailScreen'
 import ExerciseHistoryScreen from './screens/ExerciseHistoryScreen'
+import WorkoutPreviewScreen from './screens/WorkoutPreviewScreen'
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
         <Route path="/program/exercise/:exerciseId" element={<ExerciseEditorScreen />} />
         <Route path="/sessions" element={<SessionsScreen />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailScreen />} />
+        <Route path="/workout/preview" element={<WorkoutPreviewScreen />} />
         <Route path="/program/exercise/:exerciseId/history" element={<ExerciseHistoryScreen />} />
       </Routes>
     </BrowserRouter>
