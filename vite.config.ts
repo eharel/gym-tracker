@@ -25,8 +25,22 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
+        // Precache hashed assets only — NOT html. index.html is served
+        // network-first at runtime so users always get the latest version on
+        // launch without relying on iOS to honor the SW update/reload cycle.
+        globPatterns: ['**/*.{js,css,svg,png,ico}'],
+        navigateFallback: 'index.html',
         runtimeCaching: [
+          {
+            // Always fetch fresh HTML for navigation; fall back to cache offline
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'pages',
+              networkTimeoutSeconds: 4,
+              cacheableResponse: { statuses: [200] },
+            },
+          },
           {
             // Supabase API — network first, fall back to cache
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
