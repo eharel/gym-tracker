@@ -214,15 +214,16 @@ function getSuggestedWeight(
     const topSet = lastSetLogs.find(
       l => l.exercise_template_id === ex.id && l.set_type === 'top' && l.completed,
     )
-    if (!topSet?.actual_weight) return null
-    base = topSet.actual_weight
+    const topWeight = topSet?.actual_weight ?? topSet?.target_weight ?? null
+    if (!topWeight) return null
+    base = topWeight
 
     // Normal mode: check progression
     if (factor === undefined &&
-        topSet.actual_reps !== null &&
+        topSet?.actual_reps != null &&
         ex.working_rep_target &&
         hasEarnedProgression(ex.working_rep_target, topSet.actual_reps)) {
-      base = topSet.actual_weight + ex.weight_increment
+      base = base + ex.weight_increment
     }
   } else {
     // straight_sets or amrap
@@ -231,10 +232,10 @@ function getSuggestedWeight(
         l.exercise_template_id === ex.id &&
         (l.set_type === 'working' || l.set_type === 'amrap') &&
         l.completed &&
-        l.actual_weight !== null,
+        (l.actual_weight !== null || l.target_weight !== null),
     )
     if (workingSets.length === 0) return null
-    base = workingSets[0].actual_weight!
+    base = workingSets[0].actual_weight ?? workingSets[0].target_weight!
 
     // Normal mode: check progression for straight sets
     if (
