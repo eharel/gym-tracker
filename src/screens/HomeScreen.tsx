@@ -126,6 +126,105 @@ function LastSessionCard({
   )
 }
 
+// ─── Consistency heatmap ─────────────────────────────────────────────────────
+
+const HEATMAP_WEEKS = 16
+
+function localDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function ConsistencyCard({ sessions }: { sessions: Session[] }) {
+  const sessionDates = new Set(
+    sessions.filter(s => s.completed_at).map(s => localDate(new Date(s.completed_at!))),
+  )
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const todayStr = localDate(today)
+
+  const daysToMon = (today.getDay() + 6) % 7
+  const thisMonday = new Date(today)
+  thisMonday.setDate(today.getDate() - daysToMon)
+
+  const gridStart = new Date(thisMonday)
+  gridStart.setDate(thisMonday.getDate() - (HEATMAP_WEEKS - 1) * 7)
+
+  const cells = Array.from({ length: HEATMAP_WEEKS * 7 }, (_, i) => {
+    const d = new Date(gridStart)
+    d.setDate(gridStart.getDate() + i)
+    const dateStr = localDate(d)
+    return { dateStr, month: d.getMonth(), future: dateStr > todayStr, active: sessionDates.has(dateStr) }
+  })
+
+  const monthLabels: (string | null)[] = Array.from({ length: HEATMAP_WEEKS }, (_, w) => {
+    const first = cells[w * 7]
+    const prev  = w > 0 ? cells[(w - 1) * 7] : null
+    return (!prev || first.month !== prev.month)
+      ? new Date(first.dateStr + 'T12:00:00').toLocaleString('en-US', { month: 'short' })
+      : null
+  })
+
+  const weekActive = Array.from({ length: HEATMAP_WEEKS }, (_, w) =>
+    cells.slice(w * 7, w * 7 + 7).some(c => !c.future && c.active),
+  )
+  const activeWeeks = weekActive.filter(Boolean).length
+
+  let streak = 0
+  const startW = weekActive[HEATMAP_WEEKS - 1] ? HEATMAP_WEEKS - 1 : HEATMAP_WEEKS - 2
+  for (let w = startW; w >= 0; w--) {
+    if (weekActive[w]) streak++
+    else break
+  }
+
+  const DAY_LABELS = ['M', '', 'W', '', 'F', '', 'S']
+
+  return (
+    <div className="bg-surface/80 backdrop-blur border border-edge rounded-2xl p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest">Consistency</p>
+        <div className="flex items-center gap-2.5 text-xs">
+          {streak >= 2 && <span className="font-semibold text-accent">{streak}w streak</span>}
+          <span className="text-ink-disabled">{activeWeeks}/{HEATMAP_WEEKS} weeks</span>
+        </div>
+      </div>
+
+      <div className="flex gap-2 items-start">
+        {/* Day labels */}
+        <div className="flex flex-col shrink-0" style={{ gap: 2 }}>
+          {DAY_LABELS.map((d, i) => (
+            <div key={i} style={{ height: 10 }} className="flex items-center">
+              <span className="text-[8px] text-ink-disabled w-2.5 text-right leading-none">{d}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Month labels + grid */}
+        <div className="flex-1 flex flex-col" style={{ gap: 3 }}>
+          <div className="grid" style={{ gridAutoFlow: 'column', gridAutoColumns: '1fr', gap: 2 }}>
+            {monthLabels.map((label, w) => (
+              <div key={w} className="text-[8px] text-ink-disabled overflow-hidden whitespace-nowrap leading-none h-2.5 flex items-center">
+                {label ?? ''}
+              </div>
+            ))}
+          </div>
+          <div
+            className="grid"
+            style={{ gridTemplateRows: 'repeat(7, 10px)', gridAutoFlow: 'column', gridAutoColumns: '1fr', gap: 2 }}
+          >
+            {cells.map(cell => (
+              <div
+                key={cell.dateStr}
+                className={`rounded-[2px] ${cell.future ? '' : cell.active ? 'bg-accent' : 'bg-elevated'}`}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ResumeBanner({
   onResume,
   onDiscard,
@@ -275,6 +374,9 @@ export default function HomeScreen() {
 
         {/* Stats */}
         <StatsRow stats={data.stats} />
+
+        {/* Consistency heatmap */}
+        <ConsistencyCard sessions={data.sessions} />
 
         {/* Next workout */}
         <NextWorkoutCard
