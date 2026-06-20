@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getExerciseTemplates, getSetLogsForSession } from '../lib/db'
+import { getExerciseTemplates, getSetLogsForSession, updateSessionTimes } from '../lib/db'
 import type { ExerciseTemplate, SetLog } from '../types'
 import { supabase } from '../lib/supabase'
 
@@ -52,6 +52,112 @@ function calcVolume(sets: SetLog[]): number {
     .reduce((sum, s) => sum + (s.actual_weight ?? 0) * (s.actual_reps ?? 0), 0)
 }
 
+// Convert an ISO string to the "YYYY-MM-DDTHH:MM" format that datetime-local inputs expect
+function toLocalInput(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// Convert a datetime-local input value back to an ISO string (local time → UTC)
+function fromLocalInput(value: string): string {
+  return new Date(value).toISOString()
+}
+
+// ─── Edit Times Modal ─────────────────────────────────────────────────────────
+
+function EditTimesModal({
+  meta,
+  onSave,
+  onClose,
+}: {
+  meta: SessionMeta
+  onSave: (startedAt: string, completedAt: string | null) => void
+  onClose: () => void
+}) {
+  const [startVal, setStartVal] = useState(toLocalInput(meta.started_at))
+  const [endVal, setEndVal]     = useState(meta.completed_at ? toLocalInput(meta.completed_at) : '')
+  const [saving, setSaving]     = useState(false)
+  const [err, setErr]           = useState<string | null>(null)
+
+  async function handleSave() {
+    const startIso = fromLocalInput(startVal)
+    const endIso   = endVal ? fromLocalInput(endVal) : null
+
+    if (endIso && new Date(endIso) <= new Date(startIso)) {
+      setErr('End time must be after start time')
+      return
+    }
+
+    setSaving(true)
+    try {
+      await updateSessionTimes(meta.id, startIso, endIso)
+      onSave(startIso, endIso)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to save')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Sheet */}
+      <div className="relative w-full max-w-md bg-surface border border-edge rounded-2xl p-5 flex flex-col gap-5 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-ink">Edit workout time</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-ink-disabled hover:text-ink active:opacity-70">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-ink-secondary uppercase tracking-wide">Started</span>
+            <input
+              type="datetime-local"
+              value={startVal}
+              onChange={e => setStartVal(e.target.value)}
+              className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-ink-secondary uppercase tracking-wide">Finished</span>
+            <input
+              type="datetime-local"
+              value={endVal}
+              onChange={e => setEndVal(e.target.value)}
+              className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+            />
+          </label>
+        </div>
+
+        {err && <p className="text-xs text-negative">{err}</p>}
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-elevated border border-edge text-ink-secondary font-medium rounded-xl py-3 text-sm active:opacity-70"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !startVal}
+            className="flex-1 bg-accent text-white font-semibold rounded-xl py-3 text-sm active:opacity-80 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SessionDetailScreen() {
@@ -61,6 +167,7 @@ export default function SessionDetailScreen() {
   const [meta, setMeta] = useState<SessionMeta | null>(null)
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [editingTime, setEditingTime] = useState(false)
 
   useEffect(() => {
     if (!sessionId) return
@@ -69,7 +176,6 @@ export default function SessionDetailScreen() {
 
   async function load(id: string) {
     try {
-      // Load session + template name in one query
       const { data: sessionData, error: sessionError } = await supabase
         .from('sessions')
         .select('*, workout_templates(name)')
@@ -92,7 +198,6 @@ export default function SessionDetailScreen() {
         getExerciseTemplates(session.workout_template_id),
       ])
 
-      // Group set logs by exercise, preserving exercise order
       const grouped: ExerciseLog[] = []
       for (const ex of exercises) {
         const sets = setLogs
@@ -125,6 +230,17 @@ export default function SessionDetailScreen() {
 
   return (
     <div className="min-h-screen">
+      {editingTime && (
+        <EditTimesModal
+          meta={meta}
+          onSave={(startedAt, completedAt) => {
+            setMeta(prev => prev ? { ...prev, started_at: startedAt, completed_at: completedAt } : prev)
+            setEditingTime(false)
+          }}
+          onClose={() => setEditingTime(false)}
+        />
+      )}
+
       <div className="max-w-md mx-auto px-4 py-8 flex flex-col gap-5">
 
         {/* Header */}
@@ -140,7 +256,16 @@ export default function SessionDetailScreen() {
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold text-ink truncate">{meta.template_name}</h1>
-            <p className="text-xs text-ink-secondary mt-0.5">{formatDate(meta.started_at)}</p>
+            <button
+              onClick={() => setEditingTime(true)}
+              className="flex items-center gap-1 mt-0.5 text-left active:opacity-70 group"
+            >
+              <p className="text-xs text-ink-secondary group-hover:text-ink">{formatDate(meta.started_at)}</p>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink-disabled shrink-0">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -176,7 +301,6 @@ export default function SessionDetailScreen() {
                 allDone ? 'border-positive/25' : 'border-edge'
               }`}
             >
-              {/* Exercise name bar */}
               <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-3">
                 <span className="font-bold text-sm text-ink">{exercise.name}</span>
                 <span className="text-xs text-ink-disabled tabular-nums">
@@ -184,7 +308,6 @@ export default function SessionDetailScreen() {
                 </span>
               </div>
 
-              {/* Set rows */}
               <div className="px-3 pb-3 flex flex-col gap-0.5">
                 {sets.map(set => {
                   const { label, cls } = setTypePill(set.set_type)
@@ -195,12 +318,9 @@ export default function SessionDetailScreen() {
                         set.completed ? '' : 'opacity-40'
                       }`}
                     >
-                      {/* Type badge */}
                       <span className={`text-xs font-semibold border rounded px-1.5 py-0.5 shrink-0 ${cls}`}>
                         {label}
                       </span>
-
-                      {/* Weight */}
                       <span className="flex-1 tabular-nums text-ink font-medium">
                         {set.actual_weight != null
                           ? `${set.actual_weight} lbs`
@@ -208,8 +328,6 @@ export default function SessionDetailScreen() {
                             ? `${set.target_weight} lbs`
                             : '—'}
                       </span>
-
-                      {/* Reps */}
                       <span className="tabular-nums text-ink-secondary">
                         {set.actual_reps != null
                           ? `${set.actual_reps} reps`
@@ -217,8 +335,6 @@ export default function SessionDetailScreen() {
                             ? `${set.target_reps} reps`
                             : '—'}
                       </span>
-
-                      {/* Completed indicator */}
                       <div className={`w-4 h-4 rounded-full shrink-0 flex items-center justify-center ${
                         set.completed ? 'bg-positive' : 'bg-elevated border border-edge'
                       }`}>

@@ -157,6 +157,18 @@ export async function discardSession(sessionId: string): Promise<void> {
   if (error) throw error
 }
 
+export async function updateSessionTimes(
+  sessionId: string,
+  startedAt: string,
+  completedAt: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('sessions')
+    .update({ started_at: startedAt, completed_at: completedAt })
+    .eq('id', sessionId)
+  if (error) throw error
+}
+
 export interface SessionRow {
   id: string
   workout_template_id: string

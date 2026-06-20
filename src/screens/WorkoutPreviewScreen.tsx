@@ -382,16 +382,19 @@ export default function WorkoutPreviewScreen() {
           <CollapsibleBlock title="Cooldown" text={template.cooldown_text} />
         )}
 
-        {/* Start button */}
-        <div className="pt-2 pb-8">
-          <button
-            onClick={handleStart}
-            className="w-full bg-accent text-white font-bold rounded-2xl py-4 text-base active:opacity-80 transition-opacity shadow-card"
-          >
-            Start Workout
-          </button>
-        </div>
+        {/* bottom padding so content doesn't hide behind the sticky button */}
+        <div className="h-24" />
 
+      </div>
+
+      {/* Sticky Start button */}
+      <div className="fixed bottom-0 inset-x-0 px-4 pb-8 pt-3 bg-gradient-to-t from-base via-base/90 to-transparent pointer-events-none">
+        <button
+          onClick={handleStart}
+          className="w-full max-w-md mx-auto block bg-accent text-white font-bold rounded-2xl py-4 text-base active:opacity-80 transition-opacity shadow-card pointer-events-auto"
+        >
+          Start Workout
+        </button>
       </div>
     </div>
   )
