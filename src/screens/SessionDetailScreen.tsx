@@ -196,11 +196,6 @@ export default function SessionDetailScreen() {
   const [error, setError] = useState<string | null>(null)
   const [editingTime, setEditingTime] = useState(false)
 
-  useEffect(() => {
-    if (!sessionId) return
-    load(sessionId)
-  }, [sessionId])
-
   async function load(id: string) {
     try {
       const { data: sessionData, error: sessionError } = await supabase
@@ -210,13 +205,19 @@ export default function SessionDetailScreen() {
         .single()
       if (sessionError) throw sessionError
 
+      interface RawSession {
+        id: string; workout_template_id: string; started_at: string
+        completed_at: string | null; notes: string | null
+        workout_templates: { name: string } | null
+      }
+      const raw = sessionData as RawSession
       const session: SessionMeta = {
-        id: sessionData.id,
-        workout_template_id: sessionData.workout_template_id,
-        started_at: sessionData.started_at,
-        completed_at: sessionData.completed_at,
-        notes: sessionData.notes,
-        template_name: (sessionData as any).workout_templates?.name ?? 'Unknown',
+        id: raw.id,
+        workout_template_id: raw.workout_template_id,
+        started_at: raw.started_at,
+        completed_at: raw.completed_at,
+        notes: raw.notes,
+        template_name: raw.workout_templates?.name ?? 'Unknown',
       }
       setMeta(session)
 
@@ -239,6 +240,11 @@ export default function SessionDetailScreen() {
       setError(e instanceof Error ? e.message : 'Failed to load session')
     }
   }
+
+  useEffect(() => {
+    if (!sessionId) return
+    load(sessionId)
+  }, [sessionId])
 
   if (error) return (
     <div className="min-h-screen flex items-center justify-center p-6">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getActiveProgram,
@@ -135,47 +135,51 @@ function localDate(date: Date): string {
 }
 
 function ConsistencyCard({ sessions }: { sessions: Session[] }) {
-  const sessionDates = new Set(
-    sessions.filter(s => s.completed_at).map(s => localDate(new Date(s.completed_at!))),
-  )
+  const { cells, monthLabels, activeWeeks, streak } = useMemo(() => {
+    const sessionDates = new Set(
+      sessions.filter(s => s.completed_at).map(s => localDate(new Date(s.completed_at!))),
+    )
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const todayStr = localDate(today)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayStr = localDate(today)
 
-  const daysToMon = (today.getDay() + 6) % 7
-  const thisMonday = new Date(today)
-  thisMonday.setDate(today.getDate() - daysToMon)
+    const daysToMon = (today.getDay() + 6) % 7
+    const thisMonday = new Date(today)
+    thisMonday.setDate(today.getDate() - daysToMon)
 
-  const gridStart = new Date(thisMonday)
-  gridStart.setDate(thisMonday.getDate() - (HEATMAP_WEEKS - 1) * 7)
+    const gridStart = new Date(thisMonday)
+    gridStart.setDate(thisMonday.getDate() - (HEATMAP_WEEKS - 1) * 7)
 
-  const cells = Array.from({ length: HEATMAP_WEEKS * 7 }, (_, i) => {
-    const d = new Date(gridStart)
-    d.setDate(gridStart.getDate() + i)
-    const dateStr = localDate(d)
-    return { dateStr, month: d.getMonth(), future: dateStr > todayStr, active: sessionDates.has(dateStr) }
-  })
+    const cells = Array.from({ length: HEATMAP_WEEKS * 7 }, (_, i) => {
+      const d = new Date(gridStart)
+      d.setDate(gridStart.getDate() + i)
+      const dateStr = localDate(d)
+      return { dateStr, month: d.getMonth(), future: dateStr > todayStr, active: sessionDates.has(dateStr) }
+    })
 
-  const monthLabels: (string | null)[] = Array.from({ length: HEATMAP_WEEKS }, (_, w) => {
-    const first = cells[w * 7]
-    const prev  = w > 0 ? cells[(w - 1) * 7] : null
-    return (!prev || first.month !== prev.month)
-      ? new Date(first.dateStr + 'T12:00:00').toLocaleString('en-US', { month: 'short' })
-      : null
-  })
+    const monthLabels: (string | null)[] = Array.from({ length: HEATMAP_WEEKS }, (_, w) => {
+      const first = cells[w * 7]
+      const prev  = w > 0 ? cells[(w - 1) * 7] : null
+      return (!prev || first.month !== prev.month)
+        ? new Date(first.dateStr + 'T12:00:00').toLocaleString('en-US', { month: 'short' })
+        : null
+    })
 
-  const weekActive = Array.from({ length: HEATMAP_WEEKS }, (_, w) =>
-    cells.slice(w * 7, w * 7 + 7).some(c => !c.future && c.active),
-  )
-  const activeWeeks = weekActive.filter(Boolean).length
+    const weekActive = Array.from({ length: HEATMAP_WEEKS }, (_, w) =>
+      cells.slice(w * 7, w * 7 + 7).some(c => !c.future && c.active),
+    )
+    const activeWeeks = weekActive.filter(Boolean).length
 
-  let streak = 0
-  const startW = weekActive[HEATMAP_WEEKS - 1] ? HEATMAP_WEEKS - 1 : HEATMAP_WEEKS - 2
-  for (let w = startW; w >= 0; w--) {
-    if (weekActive[w]) streak++
-    else break
-  }
+    let streak = 0
+    const startW = weekActive[HEATMAP_WEEKS - 1] ? HEATMAP_WEEKS - 1 : HEATMAP_WEEKS - 2
+    for (let w = startW; w >= 0; w--) {
+      if (weekActive[w]) streak++
+      else break
+    }
+
+    return { cells, monthLabels, activeWeeks, streak }
+  }, [sessions])
 
   const DAY_LABELS = ['M', '', 'W', '', 'F', '', 'S']
 

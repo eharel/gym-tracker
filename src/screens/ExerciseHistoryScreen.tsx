@@ -49,10 +49,6 @@ export default function ExerciseHistoryScreen() {
   const [error, setError]               = useState<string | null>(null)
   const [metric, setMetric]             = useState<Metric>('weight')
 
-  useEffect(() => {
-    if (exerciseId) load(exerciseId)
-  }, [exerciseId])
-
   async function load(id: string) {
     try {
       const { data: exData } = await supabase
@@ -109,6 +105,10 @@ export default function ExerciseHistoryScreen() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (exerciseId) load(exerciseId)
+  }, [exerciseId])
 
   // ── Derived data ────────────────────────────────────────────────────────────
 

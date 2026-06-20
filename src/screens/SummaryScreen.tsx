@@ -74,11 +74,6 @@ export default function SummaryScreen() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!sessionId) return
-    load(sessionId)
-  }, [sessionId])
-
   async function load(id: string) {
     try {
       const { data: sessionData, error: sessionError } = await supabase
@@ -120,6 +115,11 @@ export default function SummaryScreen() {
       setError(e instanceof Error ? e.message : 'Failed to load summary')
     }
   }
+
+  useEffect(() => {
+    if (!sessionId) return
+    load(sessionId)
+  }, [sessionId])
 
   async function handleDone() {
     if (!sessionId) return

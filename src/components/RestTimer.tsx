@@ -28,7 +28,9 @@ function playBeep() {
       osc.stop(ctx.currentTime + offset + 0.4)
     })
     setTimeout(() => ctx.close(), 1000)
-  } catch (_) {}
+  } catch {
+    // AudioContext not supported or blocked — beep is non-critical
+  }
 }
 
 function fmt(seconds: number): string {

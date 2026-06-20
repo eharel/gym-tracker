@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import HomeScreen from './screens/HomeScreen'
 import WorkoutScreen from './screens/WorkoutScreen'
 import SummaryScreen from './screens/SummaryScreen'
@@ -12,6 +13,7 @@ import WorkoutPreviewScreen from './screens/WorkoutPreviewScreen'
 
 function App() {
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomeScreen />} />
@@ -26,6 +28,7 @@ function App() {
         <Route path="/program/exercise/:exerciseId/history" element={<ExerciseHistoryScreen />} />
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }
 

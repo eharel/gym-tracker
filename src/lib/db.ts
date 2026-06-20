@@ -178,6 +178,15 @@ export interface SessionRow {
   notes: string | null
 }
 
+interface RawSessionWithTemplate {
+  id: string
+  workout_template_id: string
+  started_at: string
+  completed_at: string | null
+  notes: string | null
+  workout_templates: { name: string; program_id: string }
+}
+
 /** Returns all sessions for a program (complete + in-progress), newest-first, with template name. */
 export async function getAllSessionsWithTemplate(programId: string): Promise<SessionRow[]> {
   const { data, error } = await supabase
@@ -186,7 +195,7 @@ export async function getAllSessionsWithTemplate(programId: string): Promise<Ses
     .eq('workout_templates.program_id', programId)
     .order('started_at', { ascending: false })
   if (error) throw error
-  return (data ?? []).map((row: any) => ({
+  return ((data ?? []) as unknown as RawSessionWithTemplate[]).map(row => ({
     id: row.id,
     workout_template_id: row.workout_template_id,
     template_name: row.workout_templates.name,

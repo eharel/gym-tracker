@@ -18,5 +18,10 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // The async data-loading pattern (useEffect → async load() → setState) is standard
+      // practice for this app. This rule incorrectly flags async setState as synchronous.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

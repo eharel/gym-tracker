@@ -352,11 +352,9 @@ function ExerciseCard({
   const workingSets = sets.filter(s => s.set_type !== 'warmup')
   const allDone = workingSets.length > 0 && workingSets.every(s => s.completed)
   const completedCount = workingSets.filter(s => s.completed).length
-  const [collapsed, setCollapsed] = useState(false)
-
-  useEffect(() => {
-    if (allDone) setCollapsed(true)
-  }, [allDone])
+  // Auto-collapse when all sets are done; manual expand overrides until allDone resets
+  const [manuallyExpanded, setManuallyExpanded] = useState(false)
+  const collapsed = allDone && !manuallyExpanded
 
   // Barbell exercises use percentage_of_top_set warmup rule
   const isBarbell = exercise.warmup_rule === 'percentage_of_top_set'
@@ -376,7 +374,7 @@ function ExerciseCard({
     }`}>
       {/* Header — tap to collapse/expand */}
       <button
-        onClick={() => setCollapsed(c => !c)}
+        onClick={() => setManuallyExpanded(e => !e)}
         className="w-full px-4 pt-4 pb-3 flex items-center gap-3 text-left active:opacity-70"
       >
         <div className={`w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center transition-colors ${
@@ -686,6 +684,7 @@ export default function WorkoutScreen() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load() }, [sessionId])
 
   // ── Set log writes (debounced) ──────────────────────────────────────────────
@@ -829,7 +828,8 @@ export default function WorkoutScreen() {
   function handleSkip(exerciseId: string, skip: boolean) {
     setSkipped(prev => {
       const next = new Set(prev)
-      skip ? next.add(exerciseId) : next.delete(exerciseId)
+      if (skip) next.add(exerciseId)
+      else next.delete(exerciseId)
       return next
     })
   }

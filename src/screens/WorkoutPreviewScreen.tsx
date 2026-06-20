@@ -223,10 +223,6 @@ export default function WorkoutPreviewScreen() {
   const [data, setData]   = useState<PreviewData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (templateId) load(templateId)
-  }, [templateId])
-
   async function load(id: string) {
     try {
       const program   = await getActiveProgram()
@@ -254,6 +250,10 @@ export default function WorkoutPreviewScreen() {
       setError(e instanceof Error ? e.message : 'Failed to load preview')
     }
   }
+
+  useEffect(() => {
+    if (templateId) load(templateId)
+  }, [templateId])
 
   function handleStart() {
     navigate(`/workout/new?template=${templateId}`)

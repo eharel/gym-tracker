@@ -208,7 +208,7 @@ function getSuggestedWeight(
   factor?: number,       // when set, we're in comeback mode
 ): number | null {
   // ── Get raw benchmark weight (no progression) ──────────────────────────────
-  let base: number | null = null
+  let base: number
 
   if (ex.working_set_type === 'top_set') {
     const topSet = lastSetLogs.find(
@@ -252,7 +252,7 @@ function getSuggestedWeight(
   }
 
   // ── Comeback mode: scale and round ─────────────────────────────────────────
-  if (factor !== undefined && base !== null) {
+  if (factor !== undefined) {
     return Math.round((base * factor) / ex.rounding_increment) * ex.rounding_increment
   }
 

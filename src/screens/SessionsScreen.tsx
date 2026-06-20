@@ -106,8 +106,6 @@ export default function SessionsScreen() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => { load() }, [])
-
   async function load() {
     try {
       const program = await getActiveProgram()
@@ -120,6 +118,8 @@ export default function SessionsScreen() {
       setLoading(false)
     }
   }
+
+  useEffect(() => { load() }, [])
 
   async function handleDelete(id: string) {
     await discardSession(id)
