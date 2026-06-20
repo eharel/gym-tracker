@@ -1,13 +1,25 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getActiveProgram, getWorkoutTemplates } from '../lib/db'
-import type { Program, WorkoutTemplate } from '../types'
+import { useSettingsStore } from '../store/settings'
+import { useUnit } from '../lib/units'
+import type { Program, WorkoutTemplate, UnitSystem } from '../types'
 
 export default function ProgramScreen() {
   const navigate = useNavigate()
+  const unit = useUnit()
+  const updateSettings = useSettingsStore(s => s.update)
+  const [savingUnit, setSavingUnit] = useState(false)
+
   const [program, setProgram] = useState<Program | null>(null)
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  async function handleUnitChange(value: UnitSystem) {
+    setSavingUnit(true)
+    try { await updateSettings({ unit_system: value }) }
+    finally { setSavingUnit(false) }
+  }
 
   useEffect(() => {
     async function load() {
@@ -81,6 +93,34 @@ export default function ProgramScreen() {
               </svg>
             </button>
           ))}
+        </div>
+
+        {/* Settings */}
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest px-1">
+            Settings
+          </p>
+          <div className="bg-surface/80 border border-edge rounded-2xl px-4 py-4 flex items-center justify-between gap-4 shadow-card">
+            <div>
+              <p className="font-semibold text-ink text-sm">Weight unit</p>
+              <p className="text-xs text-ink-disabled mt-0.5">Used throughout the app</p>
+            </div>
+            <div className={`flex bg-elevated border border-edge rounded-xl overflow-hidden shrink-0 ${savingUnit ? 'opacity-50 pointer-events-none' : ''}`}>
+              {(['imperial', 'metric'] as UnitSystem[]).map(sys => (
+                <button
+                  key={sys}
+                  onClick={() => handleUnitChange(sys)}
+                  className={`px-3.5 py-2 text-sm font-semibold transition-colors ${
+                    unit.system === sys
+                      ? 'bg-accent text-white'
+                      : 'text-ink-secondary active:opacity-70'
+                  }`}
+                >
+                  {sys === 'imperial' ? 'lbs' : 'kg'}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
       </div>

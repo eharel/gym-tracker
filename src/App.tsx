@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { useSettingsStore } from './store/settings'
 import HomeScreen from './screens/HomeScreen'
 import WorkoutScreen from './screens/WorkoutScreen'
 import SummaryScreen from './screens/SummaryScreen'
@@ -12,6 +14,9 @@ import ExerciseHistoryScreen from './screens/ExerciseHistoryScreen'
 import WorkoutPreviewScreen from './screens/WorkoutPreviewScreen'
 
 function App() {
+  const loadSettings = useSettingsStore(s => s.load)
+  useEffect(() => { loadSettings() }, [loadSettings])
+
   return (
     <ErrorBoundary>
     <BrowserRouter>

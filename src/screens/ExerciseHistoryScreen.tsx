@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useUnit } from '../lib/units'
 import { getSetLogsForExercise } from '../lib/db'
 import LineChart from '../components/LineChart'
 import { supabase } from '../lib/supabase'
@@ -42,6 +43,8 @@ export default function ExerciseHistoryScreen() {
   const [searchParams]  = useSearchParams()
   const templateId      = searchParams.get('templateId') ?? ''
   const navigate        = useNavigate()
+
+  const unit = useUnit()
 
   const [exerciseName, setExerciseName] = useState('')
   const [points, setPoints]             = useState<DataPoint[]>([])
@@ -126,11 +129,11 @@ export default function ExerciseHistoryScreen() {
   const chartDates   = activePoints.map(p => p.shortDate)
   const chartTooltips = activePoints.map(p => {
     const line1 =
-      metric === 'weight' ? `${p.weight} lbs` :
+      metric === 'weight' ? `${p.weight} ${unit.label}` :
       metric === 'e1rm'   ? `~${p.e1rm} e1RM` :
-      `${p.volume.toLocaleString()} lbs vol`
+      `${p.volume.toLocaleString()} ${unit.label} vol`
     const parts = [longDate(p.date)]
-    if (metric !== 'volume' && p.reps) parts.push(`${p.weight} lbs × ${p.reps}`)
+    if (metric !== 'volume' && p.reps) parts.push(`${p.weight} ${unit.label} × ${p.reps}`)
     else if (metric === 'volume' && p.reps) parts.push(`${p.weight} × ${p.reps}`)
     return `${line1}\n${parts.join(' · ')}`
   })
@@ -153,10 +156,7 @@ export default function ExerciseHistoryScreen() {
 
   const prLabel  = metric === 'volume' ? 'Best vol' : 'PR'
   const lastLabel = 'Last'
-  const unit =
-    metric === 'weight' ? ' lbs' :
-    metric === 'e1rm'   ? ' lbs' :
-    ' lbs'
+  const unitSuffix = ` ${unit.label}`
 
   function fmtStat(v: number | null | undefined): string {
     if (v == null) return '—'
@@ -262,7 +262,7 @@ export default function ExerciseHistoryScreen() {
                   values={chartValues}
                   dates={chartDates}
                   tooltips={chartTooltips}
-                  unit={unit}
+                  unit={unitSuffix}
                   gradId={`ex-hist-${metric}`}
                 />
               </div>
@@ -278,9 +278,9 @@ export default function ExerciseHistoryScreen() {
                             : metric === 'e1rm'   ? pt.e1rm   === prE1rm
                             : pt.volume === prVolume
                 const mainVal =
-                  metric === 'weight' ? `${pt.weight} lbs` :
-                  metric === 'e1rm'   ? (pt.e1rm ? `~${pt.e1rm} lbs` : `${pt.weight} lbs`) :
-                  `${pt.volume.toLocaleString()} lbs`
+                  metric === 'weight' ? `${pt.weight} ${unit.label}` :
+                  metric === 'e1rm'   ? (pt.e1rm ? `~${pt.e1rm} ${unit.label}` : `${pt.weight} ${unit.label}`) :
+                  `${pt.volume.toLocaleString()} ${unit.label}`
                 const subVal =
                   metric === 'weight'
                     ? pt.reps ? `${pt.reps} reps` : ''

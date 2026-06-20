@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useUnit } from '../lib/units'
 import {
   getExerciseTemplates,
   getSetLogsForSession,
@@ -69,6 +70,7 @@ export default function SummaryScreen() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
 
+  const unit = useUnit()
   const [data, setData] = useState<SummaryData | null>(null)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
@@ -228,7 +230,7 @@ export default function SummaryScreen() {
                   ? `${(totalVolume / 1000).toFixed(1)}k`
                   : totalVolume.toLocaleString()}
               </span>
-              <span className="text-xs text-ink-secondary">lbs</span>
+              <span className="text-xs text-ink-secondary">{unit.label}</span>
             </div>
             <span className="text-xs text-ink-secondary">Total volume</span>
           </div>
@@ -292,7 +294,7 @@ export default function SummaryScreen() {
                 <div key={exercise.id} className="flex items-center justify-between gap-3">
                   <span className="text-sm text-ink">{exercise.name}</span>
                   <span className="text-sm font-semibold text-positive tabular-nums">
-                    → {newWeight} lbs
+                    → {newWeight} {unit.label}
                   </span>
                 </div>
               ))}

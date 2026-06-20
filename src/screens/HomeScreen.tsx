@@ -10,6 +10,7 @@ import {
   type HomeStats,
 } from '../lib/db'
 import { getNextWorkoutTemplate } from '../lib/calculations'
+import { useUnit } from '../lib/units'
 import type { ExerciseTemplate, Program, Session, WorkoutTemplate } from '../types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -29,14 +30,15 @@ interface HomeData {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function StatsRow({ stats }: { stats: HomeStats }) {
+  const unit = useUnit()
   return (
     <div className="grid grid-cols-3 gap-3">
       <StatCell label="Total sessions" value={String(stats.totalSessions)} />
       <StatCell label="This month" value={String(stats.sessionsThisMonth)} />
       <StatCell
-        label="Squat PR"
-        value={stats.squatPR != null ? `${stats.squatPR}` : '—'}
-        unit={stats.squatPR != null ? 'lbs' : undefined}
+        label={stats.highlightExerciseName ? `${stats.highlightExerciseName} PR` : 'PR'}
+        value={stats.highlightPR != null ? `${stats.highlightPR}` : '—'}
+        unit={stats.highlightPR != null ? unit.label : undefined}
       />
     </div>
   )
@@ -278,7 +280,7 @@ export default function HomeScreen() {
       const [templates, sessions, stats, inProgress] = await Promise.all([
         getWorkoutTemplates(program.id),
         getCompletedSessions(program.id),
-        getHomeStats(program.id),
+        getHomeStats(program.id, program.highlight_exercise_id ?? null),
         getInProgressSession(),
       ])
 

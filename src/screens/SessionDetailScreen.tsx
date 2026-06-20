@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useUnit } from '../lib/units'
 import { getExerciseTemplates, getSetLogsForSession, updateSessionTimes } from '../lib/db'
 import type { ExerciseTemplate, SetLog } from '../types'
 import { supabase } from '../lib/supabase'
@@ -65,7 +66,7 @@ function fromLocalInput(value: string): string {
 }
 
 // Build a Google Calendar "quick add" URL pre-filled with the session details
-function buildGCalUrl(meta: SessionMeta, exerciseLogs: ExerciseLog[]): string {
+function buildGCalUrl(meta: SessionMeta, exerciseLogs: ExerciseLog[], unitLabel: string): string {
   // GCal expects UTC: YYYYMMDDTHHMMSSZ
   const fmt = (iso: string) =>
     new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
@@ -78,7 +79,7 @@ function buildGCalUrl(meta: SessionMeta, exerciseLogs: ExerciseLog[]): string {
     const topSet = working[0]
     const w = topSet.actual_weight ?? topSet.target_weight
     const r = topSet.actual_reps ?? topSet.target_reps
-    return w ? `${exercise.name}: ${w} lbs × ${r ?? '?'}` : exercise.name
+    return w ? `${exercise.name}: ${w} ${unitLabel} × ${r ?? '?'}` : exercise.name
   })
 
   const details = exerciseLines.join('\n')
@@ -191,6 +192,7 @@ export default function SessionDetailScreen() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
 
+  const unit = useUnit()
   const [meta, setMeta] = useState<SessionMeta | null>(null)
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -315,7 +317,7 @@ export default function SessionDetailScreen() {
                   ? `${(totalVolume / 1000).toFixed(1)}k`
                   : totalVolume.toLocaleString()}
               </span>
-              <span className="text-xs text-ink-secondary">lbs</span>
+              <span className="text-xs text-ink-secondary">{unit.label}</span>
             </div>
             <span className="text-xs text-ink-secondary">Volume</span>
           </div>
@@ -356,9 +358,9 @@ export default function SessionDetailScreen() {
                       </span>
                       <span className="flex-1 tabular-nums text-ink font-medium">
                         {set.actual_weight != null
-                          ? `${set.actual_weight} lbs`
+                          ? `${set.actual_weight} ${unit.label}`
                           : set.target_weight != null
-                            ? `${set.target_weight} lbs`
+                            ? `${set.target_weight} ${unit.label}`
                             : '—'}
                       </span>
                       <span className="tabular-nums text-ink-secondary">
@@ -396,7 +398,7 @@ export default function SessionDetailScreen() {
         {/* Add to Google Calendar */}
         {meta.completed_at && (
           <a
-            href={buildGCalUrl(meta, exerciseLogs)}
+            href={buildGCalUrl(meta, exerciseLogs, unit.label)}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-center gap-2 w-full border border-edge rounded-2xl py-3.5 text-sm font-medium text-ink-secondary hover:text-ink hover:border-edge-strong active:opacity-70 transition-colors"

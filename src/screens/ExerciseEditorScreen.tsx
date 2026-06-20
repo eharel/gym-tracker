@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useUnit } from '../lib/units'
 import { upsertExerciseTemplate } from '../lib/db'
 import type { ExerciseTemplate, WarmupRule, WorkingSetType } from '../types'
 import { supabase } from '../lib/supabase'
@@ -138,6 +139,7 @@ function SectionCard({ children }: { children: React.ReactNode }) {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ExerciseEditorScreen() {
+  const unit = useUnit()
   const { exerciseId } = useParams<{ exerciseId: string }>()
   const [searchParams] = useSearchParams()
   const templateId = searchParams.get('templateId') ?? ''
@@ -530,7 +532,7 @@ export default function ExerciseEditorScreen() {
           {warmupRule === 'fixed_weight' && (
             <>
               <FieldGroup>
-                <Label>Fixed weight (lbs)</Label>
+                <Label>Fixed weight ({unit.label})</Label>
                 <NumberInput
                   value={warmupFixedWeight}
                   onChange={v => { setWarmupFixedWeight(v); scheduleSave({ warmup_fixed_weight: Number(v) || null }) }}
@@ -555,7 +557,7 @@ export default function ExerciseEditorScreen() {
           <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest">Progression</p>
 
           <FieldGroup>
-            <Label>Weight increment (lbs)</Label>
+            <Label>Weight increment ({unit.label})</Label>
             <NumberInput
               value={weightIncrement}
               onChange={v => { setWeightIncrement(v); scheduleSave({ weight_increment: Number(v) || 5 }) }}
@@ -565,7 +567,7 @@ export default function ExerciseEditorScreen() {
           </FieldGroup>
 
           <FieldGroup>
-            <Label>Rounding increment (lbs)</Label>
+            <Label>Rounding increment ({unit.label})</Label>
             <NumberInput
               value={roundingIncrement}
               onChange={v => { setRoundingIncrement(v); scheduleSave({ rounding_increment: Number(v) || 5 }) }}

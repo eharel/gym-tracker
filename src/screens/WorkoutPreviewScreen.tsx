@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useUnit } from '../lib/units'
 import {
   getExerciseTemplates,
   getRecentCompletedSessionsForTemplate,
@@ -146,6 +147,7 @@ function PreviewExerciseCard({
   sets:        NewSetLog[]
   lastSetLogs: SetLog[]
 }) {
+  const unit       = useUnit()
   const isBarbell  = exercise.warmup_rule === 'percentage_of_top_set'
   const workingSet = sets.find(s => s.set_type === 'top' || s.set_type === 'working')
   const workingW   = workingSet?.target_weight ?? null
@@ -168,7 +170,7 @@ function PreviewExerciseCard({
               <span className="text-xs text-ink-secondary">RPE {exercise.rpe_target}</span>
             )}
             {prevWeight !== null && (
-              <span className="text-xs text-ink-disabled">prev {prevWeight} lbs</span>
+              <span className="text-xs text-ink-disabled">prev {prevWeight} {unit.label}</span>
             )}
             {plates && (
               <span className="text-xs text-ink-disabled font-mono">{plates}</span>
@@ -178,7 +180,7 @@ function PreviewExerciseCard({
         {workingW !== null && (
           <span className="text-lg font-bold text-ink tabular-nums shrink-0">
             {workingW}
-            <span className="text-xs font-normal text-ink-secondary ml-0.5">lbs</span>
+            <span className="text-xs font-normal text-ink-secondary ml-0.5">{unit.label}</span>
           </span>
         )}
       </div>

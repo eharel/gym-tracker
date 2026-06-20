@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useUnit } from '../lib/units'
 import {
   createSession,
   createSetLogs,
@@ -349,6 +350,7 @@ function ExerciseCard({
   onSkip: (id: string, skipped: boolean) => void
   onNoteChange: (exerciseId: string, text: string) => void
 }) {
+  const unit = useUnit()
   const workingSets = sets.filter(s => s.set_type !== 'warmup')
   const allDone = workingSets.length > 0 && workingSets.every(s => s.completed)
   const completedCount = workingSets.filter(s => s.completed).length
@@ -402,7 +404,7 @@ function ExerciseCard({
           {collapsed ? (
             <span className="text-xs text-ink-disabled">
               {skipped ? 'Skipped' : `${completedCount}/${workingSets.length} sets`}
-              {workingWeight != null && !skipped ? ` · ${workingWeight} lbs` : ''}
+              {workingWeight != null && !skipped ? ` · ${workingWeight} ${unit.label}` : ''}
             </span>
           ) : (
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -410,7 +412,7 @@ function ExerciseCard({
                 <span className="text-xs text-ink-secondary">RPE {exercise.rpe_target}</span>
               )}
               {prevWeight !== null && (
-                <span className="text-xs text-ink-disabled">prev {prevWeight} lbs</span>
+                <span className="text-xs text-ink-disabled">prev {prevWeight} {unit.label}</span>
               )}
               {plates && (
                 <span className="text-xs text-ink-disabled font-mono">{plates}</span>

@@ -6,6 +6,7 @@ import type {
   Program,
   Session,
   SetLog,
+  UserSettings,
   WorkoutTemplate,
 } from '../types'
 
@@ -325,35 +326,69 @@ export async function saveExerciseNote(
   return data
 }
 
+// ─── User settings ───────────────────────────────────────────────────────────
+
+export async function getUserSettings(): Promise<UserSettings | null> {
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('*')
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+export async function upsertUserSettings(
+  patch: Partial<Pick<UserSettings, 'unit_system'>>,
+): Promise<UserSettings> {
+  // Always update the single existing row; updated_at is bumped manually
+  // so we don't need a DB trigger.
+  const { data, error } = await supabase
+    .from('user_settings')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .not('id', 'is', null) // match all rows (there is only one)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
 // ─── Stats (Home screen) ─────────────────────────────────────────────────────
 
 export interface HomeStats {
   totalSessions: number
   sessionsThisMonth: number
-  squatPR: number | null
+  highlightPR: number | null
+  highlightExerciseName: string
 }
 
-export async function getHomeStats(programId: string): Promise<HomeStats> {
-  const SQUAT_ID = 'c0000000-0000-0000-0000-000000000001'
-
-  const [sessionsRes, squatRes] = await Promise.all([
-    supabase
-      .from('sessions')
-      .select('id, completed_at, workout_templates!inner(program_id)', { count: 'exact' })
-      .eq('workout_templates.program_id', programId)
-      .not('completed_at', 'is', null),
-    supabase
-      .from('set_logs')
-      .select('actual_weight')
-      .eq('exercise_template_id', SQUAT_ID)
-      .eq('set_type', 'top')
-      .not('actual_weight', 'is', null)
-      .order('actual_weight', { ascending: false })
-      .limit(1),
-  ])
-
+export async function getHomeStats(
+  programId: string,
+  highlightExerciseId: string | null,
+): Promise<HomeStats> {
+  const sessionsRes = await supabase
+    .from('sessions')
+    .select('id, completed_at, workout_templates!inner(program_id)', { count: 'exact' })
+    .eq('workout_templates.program_id', programId)
+    .not('completed_at', 'is', null)
   if (sessionsRes.error) throw sessionsRes.error
-  if (squatRes.error) throw squatRes.error
+
+  let highlightPR: number | null = null
+  let highlightExerciseName = ''
+
+  if (highlightExerciseId) {
+    const [nameRes, prRes] = await Promise.all([
+      supabase.from('exercise_templates').select('name').eq('id', highlightExerciseId).single(),
+      supabase.from('set_logs').select('actual_weight')
+        .eq('exercise_template_id', highlightExerciseId)
+        .eq('set_type', 'top')
+        .not('actual_weight', 'is', null)
+        .order('actual_weight', { ascending: false })
+        .limit(1),
+    ])
+    if (!nameRes.error && nameRes.data) highlightExerciseName = nameRes.data.name
+    highlightPR = prRes.data?.[0]?.actual_weight ?? null
+  }
 
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
@@ -364,6 +399,7 @@ export async function getHomeStats(programId: string): Promise<HomeStats> {
   return {
     totalSessions: sessionsRes.count ?? 0,
     sessionsThisMonth,
-    squatPR: squatRes.data?.[0]?.actual_weight ?? null,
+    highlightPR,
+    highlightExerciseName,
   }
 }

@@ -1,8 +1,18 @@
+export type UnitSystem = 'imperial' | 'metric'
+
+export interface UserSettings {
+  id: string
+  unit_system: UnitSystem
+  created_at: string
+  updated_at: string
+}
+
 export interface Program {
   id: string
   name: string
   description: string | null
   is_active: boolean
+  highlight_exercise_id: string | null
   created_at: string
 }
 
