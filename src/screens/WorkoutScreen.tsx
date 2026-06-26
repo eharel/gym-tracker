@@ -13,7 +13,7 @@ import {
   saveExerciseNote,
   updateSetLog,
 } from '../lib/db'
-import { calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, detectComeback, initializeSession } from '../lib/calculations'
+import { barWeightForType, calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, detectComeback, initializeSession } from '../lib/calculations'
 import type { ComebackInfo } from '../lib/calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
 import RestTimer from '../components/RestTimer'
@@ -118,7 +118,7 @@ function SetRow({
   log,
   prevLog,
   weightStep,
-  isBarbell,
+  barWeight,
   topSetWeight,
   onWeightChange,
   onRepsChange,
@@ -127,7 +127,7 @@ function SetRow({
   log: SetLog
   prevLog: SetLog | null
   weightStep: number
-  isBarbell: boolean
+  barWeight: number | null
   topSetWeight: number | null
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
@@ -185,12 +185,12 @@ function SetRow({
       log.actual_reps === prevLog.actual_reps,
   )
 
-  const isBar = isWarmup && log.target_weight === 45
+  const isBar = barWeight !== null && isWarmup && log.target_weight === barWeight
   // Per-set plate breakdown — skip the "Bar" row (no plates needed) and blank weights
-  const plateStr = isBarbell && !isBar && numericWeight ? plateBreakdown(numericWeight) : null
+  const plateStr = barWeight !== null && !isBar && numericWeight ? plateBreakdown(numericWeight, barWeight) : null
   // Warmup percentage of working/top-set weight
   const warmupPct =
-    isWarmup && isBarbell && topSetWeight && numericWeight
+    isWarmup && barWeight !== null && topSetWeight && numericWeight
       ? Math.round((numericWeight / topSetWeight) * 100)
       : null
 
@@ -358,13 +358,12 @@ function ExerciseCard({
   const [manuallyExpanded, setManuallyExpanded] = useState(false)
   const collapsed = allDone && !manuallyExpanded
 
-  // Barbell exercises use percentage_of_top_set warmup rule
-  const isBarbell = exercise.warmup_rule === 'percentage_of_top_set'
+  const barWeight = barWeightForType(exercise.bar_type)
 
   // Current working weight for plate breakdown and collapsed summary
   const topSet = sets.find(s => s.set_type === 'top') ?? sets.find(s => s.set_type === 'working')
   const workingWeight = topSet?.actual_weight ?? topSet?.target_weight ?? null
-  const plates = isBarbell && workingWeight ? plateBreakdown(workingWeight) : null
+  const plates = barWeight !== null && workingWeight ? plateBreakdown(workingWeight, barWeight) : null
 
   // Previous session's working weight
   const prevTopSet = prevSets.find(s => s.set_type === 'top') ?? prevSets.find(s => s.set_type === 'working')
@@ -474,7 +473,7 @@ function ExerciseCard({
                 log={log}
                 prevLog={prevSets.find(p => p.set_index === log.set_index && p.set_type === log.set_type) ?? null}
                 weightStep={exercise.rounding_increment}
-                isBarbell={isBarbell}
+                barWeight={barWeight}
                 topSetWeight={workingWeight}
                 onWeightChange={onWeightChange}
                 onRepsChange={onRepsChange}

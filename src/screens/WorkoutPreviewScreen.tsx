@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useUnit } from '../lib/units'
+import { barWeightForType } from '../lib/calculations'
 import {
   getExerciseTemplates,
   getRecentCompletedSessionsForTemplate,
@@ -95,17 +96,17 @@ function CollapsibleBlock({ title, text }: { title: string; text: string }) {
 
 function PreviewSetRow({
   set,
-  isBarbell,
+  barWeight,
   workingWeight,
 }: {
   set: NewSetLog
-  isBarbell: boolean
+  barWeight: number | null
   workingWeight: number | null
 }) {
   const { label, cls } = setTypeMeta(set.set_type)
-  const isBar     = set.set_type === 'warmup' && set.target_weight === 45
-  const plates    = isBarbell && !isBar && set.target_weight ? plateBreakdown(set.target_weight) : null
-  const warmupPct = set.set_type === 'warmup' && isBarbell && workingWeight && set.target_weight
+  const isBar     = barWeight !== null && set.set_type === 'warmup' && set.target_weight === barWeight
+  const plates    = barWeight !== null && !isBar && set.target_weight ? plateBreakdown(set.target_weight, barWeight) : null
+  const warmupPct = set.set_type === 'warmup' && barWeight !== null && workingWeight && set.target_weight
     ? Math.round((set.target_weight / workingWeight) * 100)
     : null
 
@@ -148,7 +149,7 @@ function PreviewExerciseCard({
   lastSetLogs: SetLog[]
 }) {
   const unit       = useUnit()
-  const isBarbell  = exercise.warmup_rule === 'percentage_of_top_set'
+  const barWeight  = barWeightForType(exercise.bar_type)
   const workingSet = sets.find(s => s.set_type === 'top' || s.set_type === 'working')
   const workingW   = workingSet?.target_weight ?? null
 
@@ -157,7 +158,7 @@ function PreviewExerciseCard({
     (l.set_type === 'top' || l.set_type === 'working'),
   )
   const prevWeight = prevSet?.actual_weight ?? null
-  const plates     = isBarbell && workingW ? plateBreakdown(workingW) : null
+  const plates     = barWeight !== null && workingW ? plateBreakdown(workingW, barWeight) : null
 
   return (
     <div className="bg-surface/80 border border-edge rounded-2xl overflow-hidden">
@@ -206,7 +207,7 @@ function PreviewExerciseCard({
           <PreviewSetRow
             key={i}
             set={set}
-            isBarbell={isBarbell}
+            barWeight={barWeight}
             workingWeight={workingW}
           />
         ))}

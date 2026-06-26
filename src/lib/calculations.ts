@@ -1,4 +1,17 @@
-import type { ExerciseTemplate, NewSetLog, Session, SetLog, WorkoutTemplate } from '../types'
+import type { BarType, ExerciseTemplate, NewSetLog, Session, SetLog, WorkoutTemplate } from '../types'
+
+// ─── Bar type ────────────────────────────────────────────────────────────────
+
+/** Standard bar weights in lbs. Returns null for exercises that use no bar. */
+export function barWeightForType(barType: BarType): number | null {
+  switch (barType) {
+    case 'barbell':          return 45
+    case 'ez_bar':           return 25
+    case 'hex_bar':          return 45
+    case 'safety_squat_bar': return 65
+    case 'none':             return null
+  }
+}
 
 // ─── Comeback detection ─────────────────────────────────────────────────────
 

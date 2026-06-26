@@ -1,4 +1,5 @@
 export type UnitSystem = 'imperial' | 'metric'
+export type BarType = 'barbell' | 'ez_bar' | 'hex_bar' | 'safety_squat_bar' | 'none'
 
 export interface UserSettings {
   id: string
@@ -39,6 +40,8 @@ export interface ExerciseTemplate {
   notes: string | null
   superset_group: string | null
   is_optional: boolean
+
+  bar_type: BarType
 
   warmup_rule: WarmupRule
   warmup_percentages: number[] | null

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useUnit } from '../lib/units'
 import { upsertExerciseTemplate } from '../lib/db'
-import type { ExerciseTemplate, WarmupRule, WorkingSetType } from '../types'
+import type { BarType, ExerciseTemplate, WarmupRule, WorkingSetType } from '../types'
 import { supabase } from '../lib/supabase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -156,6 +156,9 @@ export default function ExerciseEditorScreen() {
   const [supersetGroup, setSupersetGroup] = useState('')
   const [isOptional, setIsOptional] = useState(false)
 
+  // Bar type
+  const [barType, setBarType] = useState<BarType>('none')
+
   // Warmup
   const [warmupRule, setWarmupRule] = useState<WarmupRule>('none')
   // percentage_of_top_set
@@ -205,6 +208,7 @@ export default function ExerciseEditorScreen() {
         setSupersetGroup(ex.superset_group ?? '')
         setIsOptional(ex.is_optional)
 
+        setBarType(ex.bar_type)
         setWarmupRule(ex.warmup_rule)
         setWarmupPercentages(ex.warmup_percentages?.join(', ') ?? '')
         setWarmupReps(ex.warmup_reps?.join(', ') ?? '')
@@ -245,6 +249,8 @@ export default function ExerciseEditorScreen() {
       notes: notes.trim() || null,
       superset_group: supersetGroup.trim() || null,
       is_optional: isOptional,
+
+      bar_type: barType,
 
       warmup_rule: warmupRule,
       warmup_percentages: warmupRule === 'percentage_of_top_set' ? parseNumbers(warmupPercentages) : null,
@@ -465,6 +471,21 @@ export default function ExerciseEditorScreen() {
         {/* ── Warmup ───────────────────────────────────────────────────────── */}
         <SectionCard>
           <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest">Warmup</p>
+
+          <FieldGroup>
+            <Label>Bar type</Label>
+            <SegmentedControl<BarType>
+              options={[
+                { label: 'None',    value: 'none' },
+                { label: 'Barbell', value: 'barbell' },
+                { label: 'EZ bar',  value: 'ez_bar' },
+                { label: 'Hex',     value: 'hex_bar' },
+                { label: 'SSB',     value: 'safety_squat_bar' },
+              ]}
+              value={barType}
+              onChange={v => { setBarType(v); scheduleSave({ bar_type: v }) }}
+            />
+          </FieldGroup>
 
           <FieldGroup>
             <Label>Warmup type</Label>
