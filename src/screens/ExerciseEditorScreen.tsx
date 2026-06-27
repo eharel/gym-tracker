@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useUnit } from '../lib/units'
-import { upsertExerciseTemplate } from '../lib/db'
+import { getProgramExercises, upsertExerciseTemplate } from '../lib/db'
 import type { BarType, ExerciseTemplate, WarmupRule, WorkingSetType } from '../types'
 import { supabase } from '../lib/supabase'
 
@@ -156,6 +156,10 @@ export default function ExerciseEditorScreen() {
   const [supersetGroup, setSupersetGroup] = useState('')
   const [isOptional, setIsOptional] = useState(false)
 
+  // Alternate exercise
+  const [alternateExerciseId, setAlternateExerciseId] = useState<string | null>(null)
+  const [programExercises, setProgramExercises] = useState<ExerciseTemplate[]>([])
+
   // Bar type
   const [barType, setBarType] = useState<BarType>('none')
 
@@ -207,6 +211,18 @@ export default function ExerciseEditorScreen() {
         setNotes(ex.notes ?? '')
         setSupersetGroup(ex.superset_group ?? '')
         setIsOptional(ex.is_optional)
+        setAlternateExerciseId(ex.alternate_exercise_id ?? null)
+
+        // Load all exercises in the program for the alternate picker
+        const { data: templateData } = await supabase
+          .from('workout_templates')
+          .select('program_id')
+          .eq('id', ex.workout_template_id)
+          .single()
+        if (templateData?.program_id) {
+          const allExercises = await getProgramExercises(templateData.program_id)
+          setProgramExercises(allExercises.filter(e => e.id !== exerciseId))
+        }
 
         setBarType(ex.bar_type)
         setWarmupRule(ex.warmup_rule)
@@ -251,6 +267,7 @@ export default function ExerciseEditorScreen() {
       is_optional: isOptional,
 
       bar_type: barType,
+      alternate_exercise_id: alternateExerciseId,
 
       warmup_rule: warmupRule,
       warmup_percentages: warmupRule === 'percentage_of_top_set' ? parseNumbers(warmupPercentages) : null,
@@ -388,6 +405,29 @@ export default function ExerciseEditorScreen() {
             onChange={v => { setIsOptional(v); scheduleSave({ is_optional: v }) }}
             label="Optional exercise"
           />
+
+          {programExercises.length > 0 && (
+            <FieldGroup>
+              <Label>Alternate exercise</Label>
+              <select
+                value={alternateExerciseId ?? ''}
+                onChange={e => {
+                  const val = e.target.value || null
+                  setAlternateExerciseId(val)
+                  scheduleSave({ alternate_exercise_id: val })
+                }}
+                className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-accent transition-colors appearance-none"
+              >
+                <option value="">None</option>
+                {programExercises.map(ex => (
+                  <option key={ex.id} value={ex.id}>{ex.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-ink-disabled">
+                Shown as a quick-swap option during workouts when this exercise can't be performed.
+              </p>
+            </FieldGroup>
+          )}
         </SectionCard>
 
         {/* ── Working sets ─────────────────────────────────────────────────── */}

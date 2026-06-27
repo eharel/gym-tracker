@@ -42,6 +42,7 @@ export interface ExerciseTemplate {
   is_optional: boolean
 
   bar_type: BarType
+  alternate_exercise_id: string | null
 
   warmup_rule: WarmupRule
   warmup_percentages: number[] | null

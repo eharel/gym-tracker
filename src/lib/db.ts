@@ -46,6 +46,26 @@ export async function getExerciseTemplates(workoutTemplateId: string): Promise<E
   return data
 }
 
+export async function getExerciseTemplate(id: string): Promise<ExerciseTemplate | null> {
+  const { data, error } = await supabase
+    .from('exercise_templates')
+    .select('*')
+    .eq('id', id)
+    .single()
+  if (error) { if (error.code === 'PGRST116') return null; throw error }
+  return data
+}
+
+export async function getProgramExercises(programId: string): Promise<ExerciseTemplate[]> {
+  const { data, error } = await supabase
+    .from('exercise_templates')
+    .select('*, workout_templates!inner(program_id)')
+    .eq('workout_templates.program_id', programId)
+    .order('name')
+  if (error) throw error
+  return data as unknown as ExerciseTemplate[]
+}
+
 export async function upsertExerciseTemplate(
   template: Omit<ExerciseTemplate, 'id' | 'created_at'> & { id?: string },
 ): Promise<ExerciseTemplate> {

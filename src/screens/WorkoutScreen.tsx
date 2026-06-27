@@ -5,6 +5,7 @@ import {
   createSession,
   createSetLogs,
   getExerciseNotes,
+  getExerciseTemplate,
   getExerciseTemplates,
   getRecentCompletedSessionsForTemplate,
   getSetLogsForExercise,
@@ -28,6 +29,8 @@ interface WorkoutData {
   lastSetLogs: SetLog[]           // benchmark logs (pre-gap during comeback)
   stalenessMap: Record<string, number>
   comeback: ComebackInfo | null
+  // Maps primary exercise ID → its alternate ExerciseTemplate (preloaded)
+  altExercises: Map<string, ExerciseTemplate>
 }
 
 interface NoteEntry {
@@ -353,6 +356,10 @@ function ExerciseCard({
   note,
   staleness,
   skipped,
+  altName,
+  isSwapped,
+  onSwap,
+  swapping,
   onWeightChange,
   onRepsChange,
   onToggleComplete,
@@ -365,6 +372,10 @@ function ExerciseCard({
   note: NoteEntry
   staleness: number
   skipped: boolean
+  altName: string | null
+  isSwapped: boolean
+  onSwap?: () => void
+  swapping?: boolean
   onWeightChange: (id: string, value: string) => void
   onRepsChange: (id: string, value: string) => void
   onToggleComplete: (id: string) => void
@@ -410,7 +421,7 @@ function ExerciseCard({
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <h3 className={`font-bold text-base leading-tight ${allDone ? 'text-ink-secondary' : 'text-ink'}`}>
               {exercise.name}
             </h3>
@@ -419,6 +430,27 @@ function ExerciseCard({
             )}
             {staleness >= 1 && staleness < 3 && (
               <span className="text-ink-disabled text-xs" title={`No progress in ${staleness} session${staleness > 1 ? 's' : ''}`}>●</span>
+            )}
+            {onSwap && altName && (
+              <button
+                onClick={e => { e.stopPropagation(); onSwap() }}
+                disabled={swapping}
+                className={`text-xs px-2 py-0.5 rounded-lg border flex items-center gap-1 shrink-0 transition-colors active:opacity-70 ${
+                  isSwapped
+                    ? 'border-accent/40 text-accent bg-accent/10'
+                    : 'border-edge text-ink-disabled bg-elevated'
+                } ${swapping ? 'opacity-50' : ''}`}
+              >
+                {swapping ? (
+                  <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin inline-block" />
+                ) : (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7 16V4m0 0L3 8m4-4 4 4" />
+                    <path d="M17 8v12m0 0 4-4m-4 4-4-4" />
+                  </svg>
+                )}
+                {altName}
+              </button>
             )}
           </div>
           {collapsed ? (
@@ -607,6 +639,9 @@ export default function WorkoutScreen() {
   const [notes, setNotes] = useState<Record<string, NoteEntry>>({})
   const [restSignal, setRestSignal] = useState(0)
   const [comebackDismissed, setComebackDismissed] = useState(false)
+  // primary exercise ID → currently showing alternate
+  const [swappedToAlt, setSwappedToAlt] = useState<Set<string>>(new Set())
+  const [swapping, setSwapping] = useState<string | null>(null)
 
   const pendingUpdates = useRef<Map<string, Partial<SetLog>>>(new Map())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -623,6 +658,17 @@ export default function WorkoutScreen() {
       }),
     )
     return Object.fromEntries(entries)
+  }
+
+  async function loadAltExercises(exercises: ExerciseTemplate[]): Promise<Map<string, ExerciseTemplate>> {
+    const alts = new Map<string, ExerciseTemplate>()
+    const toFetch = exercises.filter(e => e.alternate_exercise_id)
+    if (toFetch.length === 0) return alts
+    await Promise.all(toFetch.map(async e => {
+      const alt = await getExerciseTemplate(e.alternate_exercise_id!)
+      if (alt) alts.set(e.id, alt)
+    }))
+    return alts
   }
 
   async function load() {
@@ -661,8 +707,11 @@ export default function WorkoutScreen() {
         navigate(`/workout/${session.id}`, { replace: true })
 
         const exercises2 = await getExerciseTemplates(templateId)
-        const stalenessMap = await buildStalenessMap(exercises2)
-        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback })
+        const [stalenessMap, altExercises] = await Promise.all([
+          buildStalenessMap(exercises2),
+          loadAltExercises(exercises2),
+        ])
+        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback, altExercises })
         setNotes({})
       } else {
         if (!sessionId) throw new Error('No session ID')
@@ -689,16 +738,17 @@ export default function WorkoutScreen() {
           lastLogs = firstRecent ? await getSetLogsForSession(firstRecent.id) : []
         }
 
-        const [existingNotes, stalenessMap] = await Promise.all([
+        const [existingNotes, stalenessMap, altExercises] = await Promise.all([
           getExerciseNotes(sessionId),
           buildStalenessMap(exercises),
+          loadAltExercises(exercises),
         ])
         const notesMap: Record<string, NoteEntry> = {}
         existingNotes.forEach(n => {
           notesMap[n.exercise_template_id] = { id: n.id, text: n.note }
         })
 
-        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback })
+        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback, altExercises })
         setNotes(notesMap)
       }
     } catch (e) {
@@ -856,6 +906,33 @@ export default function WorkoutScreen() {
     })
   }
 
+  async function handleSwap(primaryExerciseId: string) {
+    if (!data || swapping) return
+
+    if (swappedToAlt.has(primaryExerciseId)) {
+      setSwappedToAlt(prev => { const next = new Set(prev); next.delete(primaryExerciseId); return next })
+      return
+    }
+
+    const altExercise = data.altExercises.get(primaryExerciseId)
+    if (!altExercise) return
+
+    setSwapping(primaryExerciseId)
+    try {
+      // Only create set logs for the alternate once per session
+      const altLogsExist = data.setLogs.some(l => l.exercise_template_id === altExercise.id)
+      if (!altLogsExist) {
+        const altPrevLogs = await getSetLogsForExercise(altExercise.id, 20)
+        const newLogs = initializeSession([altExercise], altPrevLogs, data.comeback?.factor)
+        const created = await createSetLogs(data.session.id, newLogs)
+        setData(prev => prev ? { ...prev, setLogs: [...prev.setLogs, ...created] } : prev)
+      }
+      setSwappedToAlt(prev => new Set(prev).add(primaryExerciseId))
+    } finally {
+      setSwapping(null)
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (error) {
@@ -902,27 +979,38 @@ export default function WorkoutScreen() {
     i++
   }
 
-  function renderCard(exercise: ExerciseTemplate) {
+  function renderCard(primaryExercise: ExerciseTemplate) {
+    const isSwapped = swappedToAlt.has(primaryExercise.id)
+    const altExercise = data!.altExercises?.get(primaryExercise.id)
+    const activeExercise = isSwapped && altExercise ? altExercise : primaryExercise
+
     const exerciseSets = setLogs
-      .filter(l => l.exercise_template_id === exercise.id)
+      .filter(l => l.exercise_template_id === activeExercise.id)
       .sort((a, b) => a.set_index - b.set_index)
     const prevExerciseSets = data!.lastSetLogs
-      .filter(l => l.exercise_template_id === exercise.id)
+      .filter(l => l.exercise_template_id === activeExercise.id)
       .sort((a, b) => a.set_index - b.set_index)
+
+    // The label shown on the swap button is always the OTHER option
+    const altName = isSwapped ? primaryExercise.name : (altExercise?.name ?? null)
 
     return (
       <ExerciseCard
-        key={exercise.id}
-        exercise={exercise}
+        key={primaryExercise.id}
+        exercise={activeExercise}
         sets={exerciseSets}
         prevSets={prevExerciseSets}
-        note={notes[exercise.id] ?? { text: '' }}
-        staleness={data!.stalenessMap[exercise.id] ?? 0}
-        skipped={skipped.has(exercise.id)}
+        note={notes[activeExercise.id] ?? { text: '' }}
+        staleness={data!.stalenessMap[activeExercise.id] ?? 0}
+        skipped={skipped.has(primaryExercise.id)}
+        altName={altName}
+        isSwapped={isSwapped}
+        onSwap={altExercise ? () => handleSwap(primaryExercise.id) : undefined}
+        swapping={swapping === primaryExercise.id}
         onWeightChange={handleWeightChange}
         onRepsChange={handleRepsChange}
         onToggleComplete={handleToggleComplete}
-        onSkip={handleSkip}
+        onSkip={(_, s) => handleSkip(primaryExercise.id, s)}
         onNoteChange={handleNoteChange}
       />
     )
