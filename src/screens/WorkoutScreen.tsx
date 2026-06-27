@@ -203,7 +203,12 @@ function SetRow({
 
   // Sub-label content — computed here so we can skip the info row when empty
   const weightSubLabel = !isWarmup ? (
-    <DeltaBadge current={numericWeight} previous={prevLog?.actual_weight ?? null} />
+    <>
+      <DeltaBadge current={numericWeight} previous={prevLog?.actual_weight ?? null} />
+      {plateStr && (
+        <span className="text-xs text-ink-disabled tabular-nums leading-tight text-center">{plateStr}</span>
+      )}
+    </>
   ) : isBelowTarget ? (
     <span className="text-xs text-caution tabular-nums">target {log.target_weight}</span>
   ) : (plateStr || warmupPct !== null) ? (
