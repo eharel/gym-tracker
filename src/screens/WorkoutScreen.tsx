@@ -424,7 +424,7 @@ function ExerciseCard({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {exercise.is_optional && !collapsed && (
+          {!collapsed && (
             <span
               onClick={e => { e.stopPropagation(); onSkip(exercise.id, !skipped) }}
               className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
