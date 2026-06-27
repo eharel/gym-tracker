@@ -271,6 +271,8 @@ function SetRow({
         </div>
       </div>
 
+      <div className="w-px self-stretch bg-edge shrink-0" />
+
       {/* Reps column */}
       <div className="flex-[2] min-w-0 flex flex-col items-center gap-0.5">
         <div className="w-full flex items-center gap-1">
