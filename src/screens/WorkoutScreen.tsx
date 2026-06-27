@@ -201,81 +201,85 @@ function SetRow({
       ? Math.round((numericWeight / topSetWeight) * 100)
       : null
 
+  // Sub-label content — computed here so we can skip the info row when empty
+  const weightSubLabel = !isWarmup ? (
+    <DeltaBadge current={numericWeight} previous={prevLog?.actual_weight ?? null} />
+  ) : isBelowTarget ? (
+    <span className="text-xs text-caution tabular-nums">target {log.target_weight}</span>
+  ) : (plateStr || warmupPct !== null) ? (
+    <span className="text-xs text-ink-disabled tabular-nums leading-tight text-center">
+      {[plateStr, warmupPct !== null ? `${warmupPct}%` : null].filter(Boolean).join(' · ')}
+    </span>
+  ) : null
+
+  const repsSubLabel = completed
+    ? (!isWarmup ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} /> : null)
+    : (isPrefilled || log.actual_reps === null)
+      ? (log.target_reps ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span> : null)
+      : (!isWarmup ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} /> : null)
+
+  const hasSubLabels = weightSubLabel !== null || repsSubLabel !== null
+
   return (
-    <div
-      className={`flex items-center gap-2 py-2 px-3 rounded-lg transition-colors ${
-        completed ? 'bg-positive/5' : 'bg-transparent'
-      }`}
-    >
-      {/* Set type label */}
-      <div className="w-12 shrink-0 text-center">
-        <span className={`text-xs font-semibold ${className} ${completed ? 'opacity-50' : ''}`}>
-          {text}
-        </span>
-      </div>
+    <div className={`py-2 px-3 rounded-lg transition-colors ${completed ? 'bg-positive/5' : 'bg-transparent'}`}>
 
-      {/* Weight column */}
-      <div className="flex-[2] min-w-0 flex flex-col items-center gap-0.5">
-        {isBar ? (
-          <div className="w-full flex items-center gap-1">
-            {!completed && <div className="w-5 h-5 shrink-0" />}
-            <span className={`flex-1 block text-center text-sm font-medium rounded-lg py-2 border
-              ${completed
-                ? 'bg-transparent border-transparent text-ink-disabled'
-                : 'bg-elevated border-edge text-ink-secondary'
-              }`}>
-              Bar
-            </span>
-            {!completed && <div className="w-5 h-5 shrink-0" />}
-          </div>
-        ) : (
-          <div className="w-full flex items-center gap-1">
-            {!completed && (
-              <StepBtn label={`−${weightStep}`} icon="minus" onClick={() => stepWeight(-weightStep)} />
-            )}
-            <input
-              ref={weightInputRef}
-              type="number"
-              inputMode="decimal"
-              step={weightStep}
-              value={weightDisplay}
-              onChange={handleWeightInput}
-              disabled={completed}
-              className={`flex-1 min-w-0 text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
-                ${completed
-                  ? 'border-transparent text-ink-disabled bg-transparent'
-                  : isBelowTarget
-                    ? 'border-caution/60 text-caution focus:border-caution'
-                    : isWarmup
-                      ? 'border-edge text-ink-secondary focus:border-edge-strong'
-                      : 'border-edge text-ink focus:border-accent'
-                }`}
-            />
-            {!completed && (
-              <StepBtn label={`+${weightStep}`} icon="plus" onClick={() => stepWeight(weightStep)} />
-            )}
-          </div>
-        )}
-        {/* Sub-label: delta · plate breakdown · warmup % · below-target warning */}
-        <div className="min-h-4 flex flex-col items-center justify-center gap-px">
-          {!isWarmup && (
-            <DeltaBadge current={numericWeight} previous={prevLog?.actual_weight ?? null} />
-          )}
-          {isWarmup && isBelowTarget ? (
-            <span className="text-xs text-caution tabular-nums">target {log.target_weight}</span>
-          ) : (plateStr || warmupPct !== null) ? (
-            <span className="text-xs text-ink-disabled tabular-nums leading-tight">
-              {[plateStr, warmupPct !== null ? `${warmupPct}%` : null].filter(Boolean).join(' · ')}
-            </span>
-          ) : null}
+      {/* ── Input row: always fixed height, never pushed by sub-labels ── */}
+      <div className="flex items-center gap-2">
+        {/* Set type label */}
+        <div className="w-12 shrink-0 text-center">
+          <span className={`text-xs font-semibold ${className} ${completed ? 'opacity-50' : ''}`}>
+            {text}
+          </span>
         </div>
-      </div>
 
-      <div className="w-px self-stretch bg-edge shrink-0" />
+        {/* Weight input */}
+        <div className="flex-[2] min-w-0 flex items-center gap-1">
+          {isBar ? (
+            <>
+              {!completed && <div className="w-6 h-6 shrink-0" />}
+              <span className={`flex-1 block text-center text-sm font-medium rounded-lg py-2 border
+                ${completed
+                  ? 'bg-transparent border-transparent text-ink-disabled'
+                  : 'bg-elevated border-edge text-ink-secondary'
+                }`}>
+                Bar
+              </span>
+              {!completed && <div className="w-6 h-6 shrink-0" />}
+            </>
+          ) : (
+            <>
+              {!completed && (
+                <StepBtn label={`−${weightStep}`} icon="minus" onClick={() => stepWeight(-weightStep)} />
+              )}
+              <input
+                ref={weightInputRef}
+                type="number"
+                inputMode="decimal"
+                step={weightStep}
+                value={weightDisplay}
+                onChange={handleWeightInput}
+                disabled={completed}
+                className={`flex-1 min-w-0 text-center text-sm font-medium rounded-lg py-2 bg-elevated border transition-colors outline-none
+                  ${completed
+                    ? 'border-transparent text-ink-disabled bg-transparent'
+                    : isBelowTarget
+                      ? 'border-caution/60 text-caution focus:border-caution'
+                      : isWarmup
+                        ? 'border-edge text-ink-secondary focus:border-edge-strong'
+                        : 'border-edge text-ink focus:border-accent'
+                  }`}
+              />
+              {!completed && (
+                <StepBtn label={`+${weightStep}`} icon="plus" onClick={() => stepWeight(weightStep)} />
+              )}
+            </>
+          )}
+        </div>
 
-      {/* Reps column */}
-      <div className="flex-[2] min-w-0 flex flex-col items-center gap-0.5">
-        <div className="w-full flex items-center gap-1">
+        <div className="w-px self-stretch bg-edge shrink-0" />
+
+        {/* Reps input */}
+        <div className="flex-[2] min-w-0 flex items-center gap-1">
           {!completed && (
             <StepBtn label="−1 rep" icon="minus" onClick={() => stepReps(-1)} />
           )}
@@ -301,39 +305,36 @@ function SetRow({
             <StepBtn label="+1 rep" icon="plus" onClick={() => stepReps(1)} />
           )}
         </div>
-        {/* Sub-label: target range while active; delta always (including after completion) */}
-        <div className="h-4 flex items-center justify-center">
-          {completed
-            ? (!isWarmup
-                ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} />
-                : null)
-            : isPrefilled || log.actual_reps === null
-              ? (log.target_reps
-                  ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
-                  : null)
-              : (!isWarmup
-                  ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} />
-                  : null)
-          }
-        </div>
+
+        {/* Done checkbox */}
+        <button
+          onClick={() => onToggleComplete(log.id)}
+          className={`w-8 h-8 shrink-0 rounded-full border-2 flex items-center justify-center transition-colors active:scale-95
+            ${completed
+              ? 'bg-positive border-positive'
+              : 'border-edge-strong bg-transparent'
+            }`}
+          aria-label={completed ? 'Mark incomplete' : 'Mark complete'}
+        >
+          {completed && (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          )}
+        </button>
       </div>
 
-      {/* Done checkbox */}
-      <button
-        onClick={() => onToggleComplete(log.id)}
-        className={`w-8 h-8 shrink-0 rounded-full border-2 flex items-center justify-center transition-colors active:scale-95
-          ${completed
-            ? 'bg-positive border-positive'
-            : 'border-edge-strong bg-transparent'
-          }`}
-        aria-label={completed ? 'Mark incomplete' : 'Mark complete'}
-      >
-        {completed && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        )}
-      </button>
+      {/* ── Info row: below inputs, never affects their alignment ── */}
+      {hasSubLabels && (
+        <div className="flex gap-2 mt-0.5">
+          <div className="w-12 shrink-0" />
+          <div className="flex-[2] flex flex-col items-center">{weightSubLabel}</div>
+          <div className="w-px shrink-0" />
+          <div className="flex-[2] flex items-center justify-center">{repsSubLabel}</div>
+          <div className="w-8 shrink-0" />
+        </div>
+      )}
+
     </div>
   )
 }
