@@ -95,6 +95,8 @@ export default function TemplateEditorScreen() {
       notes: null,
       superset_group: null,
       is_optional: false,
+      bar_type: 'none',
+      alternate_exercise_id: null,
       warmup_rule: 'none',
       warmup_percentages: null,
       warmup_reps: null,
