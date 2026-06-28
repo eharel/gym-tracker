@@ -463,13 +463,7 @@ function ExerciseCard({
               {exercise.rpe_target && (
                 <span className="text-xs text-ink-secondary">RPE {exercise.rpe_target}</span>
               )}
-              {prevWeight !== null && (
-                <span className="text-xs text-ink-disabled">prev {prevWeight} {unit.label}</span>
-              )}
-              {plates && (
-                <span className="text-xs text-ink-disabled font-mono">{plates}</span>
-              )}
-              {exercise.notes && !plates && !prevWeight && (
+              {exercise.notes && (
                 <span className="text-xs text-ink-disabled truncate">{exercise.notes}</span>
               )}
             </div>
