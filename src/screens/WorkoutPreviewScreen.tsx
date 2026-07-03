@@ -364,7 +364,7 @@ export default function WorkoutPreviewScreen() {
               <div className="flex flex-col items-center pt-6 pb-1 shrink-0">
                 <div className="w-0.5 flex-1 bg-accent/25 rounded-full" />
               </div>
-              <div className="flex-1 flex flex-col gap-2">
+              <div className="flex-1 min-w-0 flex flex-col gap-2">
                 <p className="text-xs text-accent/70 font-semibold uppercase tracking-widest px-1">
                   Superset
                 </p>
