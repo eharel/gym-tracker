@@ -1,8 +1,16 @@
 export type UnitSystem = 'imperial' | 'metric'
 export type BarType = 'barbell' | 'ez_bar' | 'hex_bar' | 'safety_squat_bar' | 'none'
 
+/** A household member. `id` becomes auth.users.id when real auth lands. */
+export interface Profile {
+  id: string
+  name: string
+  created_at: string
+}
+
 export interface UserSettings {
   id: string
+  profile_id: string
   unit_system: UnitSystem
   created_at: string
   updated_at: string
@@ -10,6 +18,7 @@ export interface UserSettings {
 
 export interface Program {
   id: string
+  profile_id: string
   name: string
   description: string | null
   is_active: boolean
@@ -68,6 +77,7 @@ export interface ExerciseTemplate {
 
 export interface Session {
   id: string
+  profile_id: string
   workout_template_id: string
   started_at: string
   completed_at: string | null

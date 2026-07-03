@@ -1,22 +1,25 @@
 import { create } from 'zustand'
 import { getUserSettings, upsertUserSettings } from '../lib/db'
+import { useProfileStore } from './profile'
 import type { UnitSystem, UserSettings } from '../types'
 
 interface SettingsState {
   settings: UserSettings | null
-  loaded: boolean
+  /** Which profile the settings were loaded for — reloads on switch. */
+  loadedFor: string | null
   load: () => Promise<void>
   update: (patch: Partial<Pick<UserSettings, 'unit_system'>>) => Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: null,
-  loaded: false,
+  loadedFor: null,
 
   async load() {
-    if (get().loaded) return
+    const profileId = useProfileStore.getState().currentProfileId
+    if (!profileId || get().loadedFor === profileId) return
     const s = await getUserSettings()
-    set({ settings: s, loaded: true })
+    set({ settings: s, loadedFor: profileId })
   },
 
   async update(patch) {

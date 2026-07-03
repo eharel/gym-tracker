@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSettingsStore } from './store/settings'
+import { useProfileStore } from './store/profile'
+import ProfilePickerScreen from './screens/ProfilePickerScreen'
 import HomeScreen from './screens/HomeScreen'
 import WorkoutScreen from './screens/WorkoutScreen'
 import SummaryScreen from './screens/SummaryScreen'
@@ -15,8 +17,32 @@ import WorkoutPreviewScreen from './screens/WorkoutPreviewScreen'
 import ProgressScreen from './screens/ProgressScreen'
 
 function App() {
+  const profilesLoaded = useProfileStore(s => s.loaded)
+  const currentProfileId = useProfileStore(s => s.currentProfileId)
+  const loadProfiles = useProfileStore(s => s.load)
   const loadSettings = useSettingsStore(s => s.load)
-  useEffect(() => { loadSettings() }, [loadSettings])
+
+  useEffect(() => { loadProfiles() }, [loadProfiles])
+  // Settings are per-profile; the store reloads when the profile changes
+  useEffect(() => {
+    if (currentProfileId) loadSettings()
+  }, [currentProfileId, loadSettings])
+
+  if (!profilesLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (!currentProfileId) {
+    return (
+      <ErrorBoundary>
+        <ProfilePickerScreen />
+      </ErrorBoundary>
+    )
+  }
 
   return (
     <ErrorBoundary>

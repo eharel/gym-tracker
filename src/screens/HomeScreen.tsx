@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  createStarterProgram,
   getActiveProgram,
   getCompletedSessions,
   getExerciseTemplates,
@@ -10,6 +11,7 @@ import {
   type HomeStats,
 } from '../lib/db'
 import { getNextWorkoutTemplate } from '../lib/calculations'
+import { useProfileStore } from '../store/profile'
 import { useUnit } from '../lib/units'
 import type { ExerciseTemplate, Program, Session, WorkoutTemplate } from '../types'
 
@@ -271,11 +273,16 @@ export default function HomeScreen() {
   const navigate = useNavigate()
   const [data, setData] = useState<HomeData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [noProgram, setNoProgram] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const profileName = useProfileStore(
+    s => s.profiles.find(p => p.id === s.currentProfileId)?.name ?? '',
+  )
 
   async function load() {
     try {
       const program = await getActiveProgram()
-      if (!program) { setError('No active program found.'); return }
+      if (!program) { setNoProgram(true); return }
 
       const [templates, sessions, stats, inProgress] = await Promise.all([
         getWorkoutTemplates(program.id),
@@ -318,6 +325,42 @@ export default function HomeScreen() {
 
   function handleBegin() {
     navigate(`/workout/preview?template=${data?.nextTemplate.id}`)
+  }
+
+  async function handleCreateProgram() {
+    setCreating(true)
+    try {
+      await createStarterProgram(profileName ? `${profileName}'s Program` : 'My Program')
+      navigate('/program')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create program')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (noProgram) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="w-full max-w-xs flex flex-col gap-5 text-center">
+          <div>
+            <h1 className="text-2xl font-bold text-ink">
+              {profileName ? `Welcome, ${profileName}!` : 'Welcome!'}
+            </h1>
+            <p className="text-sm text-ink-secondary mt-2 leading-relaxed">
+              You don't have a program yet. Create one and add your workouts and exercises.
+            </p>
+          </div>
+          <button
+            onClick={handleCreateProgram}
+            disabled={creating}
+            className="bg-accent text-white font-bold rounded-2xl py-3.5 text-base active:opacity-80 disabled:opacity-50 shadow-card"
+          >
+            {creating ? 'Creating…' : 'Create my program'}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (error) {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getActiveProgram, getWorkoutTemplates } from '../lib/db'
 import { useSettingsStore } from '../store/settings'
+import { useProfileStore } from '../store/profile'
 import { useUnit } from '../lib/units'
 import type { Program, WorkoutTemplate, UnitSystem } from '../types'
 
@@ -10,6 +11,10 @@ export default function ProgramScreen() {
   const unit = useUnit()
   const updateSettings = useSettingsStore(s => s.update)
   const [savingUnit, setSavingUnit] = useState(false)
+  const switchProfile = useProfileStore(s => s.switchProfile)
+  const profileName = useProfileStore(
+    s => s.profiles.find(p => p.id === s.currentProfileId)?.name ?? '',
+  )
 
   const [program, setProgram] = useState<Program | null>(null)
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([])
@@ -100,6 +105,18 @@ export default function ProgramScreen() {
           <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest px-1">
             Settings
           </p>
+          <div className="bg-surface/80 border border-edge rounded-2xl px-4 py-4 flex items-center justify-between gap-4 shadow-card">
+            <div>
+              <p className="font-semibold text-ink text-sm">Profile</p>
+              <p className="text-xs text-ink-disabled mt-0.5">Training as {profileName || '—'}</p>
+            </div>
+            <button
+              onClick={switchProfile}
+              className="text-sm font-semibold text-ink-secondary bg-elevated border border-edge rounded-xl px-3.5 py-2 active:opacity-70 shrink-0"
+            >
+              Switch
+            </button>
+          </div>
           <div className="bg-surface/80 border border-edge rounded-2xl px-4 py-4 flex items-center justify-between gap-4 shadow-card">
             <div>
               <p className="font-semibold text-ink text-sm">Weight unit</p>

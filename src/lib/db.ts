@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { requireProfileId } from '../store/profile'
 import type {
   ExerciseNote,
   ExerciseTemplate,
@@ -10,16 +11,40 @@ import type {
   WorkoutTemplate,
 } from '../types'
 
+// User-owned root tables (programs, sessions, user_settings) are scoped to
+// the current profile via requireProfileId(). Child tables (templates,
+// exercises, set_logs, notes) inherit scope through their parent's id.
+
 // ─── Programs ───────────────────────────────────────────────────────────────
 
 export async function getActiveProgram(): Promise<Program | null> {
   const { data, error } = await supabase
     .from('programs')
     .select('*')
+    .eq('profile_id', requireProfileId())
     .eq('is_active', true)
-    .single()
-  if (error) { if (error.code === 'PGRST116') return null; throw error }
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
   return data
+}
+
+/** Creates a program with two empty workout templates — the first-run path
+ *  for a new profile. */
+export async function createStarterProgram(name: string): Promise<Program> {
+  const { data: program, error } = await supabase
+    .from('programs')
+    .insert({ name, is_active: true, profile_id: requireProfileId() })
+    .select()
+    .single()
+  if (error) throw error
+
+  const { error: tErr } = await supabase.from('workout_templates').insert([
+    { program_id: program.id, name: 'Workout A', order_in_program: 0 },
+    { program_id: program.id, name: 'Workout B', order_in_program: 1 },
+  ])
+  if (tErr) throw tErr
+  return program
 }
 
 // ─── Workout templates ───────────────────────────────────────────────────────
@@ -160,23 +185,24 @@ export async function getLastSessionForTemplate(
   return data
 }
 
-/** Returns the in-progress session (completed_at is null), if any. */
+/** Returns the current profile's in-progress session, if any. */
 export async function getInProgressSession(): Promise<Session | null> {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
+    .eq('profile_id', requireProfileId())
     .is('completed_at', null)
     .order('started_at', { ascending: false })
     .limit(1)
-    .single()
-  if (error) { if (error.code === 'PGRST116') return null; throw error }
+    .maybeSingle()
+  if (error) throw error
   return data
 }
 
 export async function createSession(workoutTemplateId: string): Promise<Session> {
   const { data, error } = await supabase
     .from('sessions')
-    .insert({ workout_template_id: workoutTemplateId })
+    .insert({ workout_template_id: workoutTemplateId, profile_id: requireProfileId() })
     .select()
     .single()
   if (error) throw error
@@ -376,7 +402,7 @@ export async function getUserSettings(): Promise<UserSettings | null> {
   const { data, error } = await supabase
     .from('user_settings')
     .select('*')
-    .limit(1)
+    .eq('profile_id', requireProfileId())
     .maybeSingle()
   if (error) throw error
   return data
@@ -385,12 +411,14 @@ export async function getUserSettings(): Promise<UserSettings | null> {
 export async function upsertUserSettings(
   patch: Partial<Pick<UserSettings, 'unit_system'>>,
 ): Promise<UserSettings> {
-  // Always update the single existing row; updated_at is bumped manually
-  // so we don't need a DB trigger.
+  // One row per profile (unique index on profile_id); creates it on first
+  // write for a new profile. updated_at is bumped manually — no DB trigger.
   const { data, error } = await supabase
     .from('user_settings')
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .not('id', 'is', null) // match all rows (there is only one)
+    .upsert(
+      { profile_id: requireProfileId(), ...patch, updated_at: new Date().toISOString() },
+      { onConflict: 'profile_id' },
+    )
     .select()
     .single()
   if (error) throw error
