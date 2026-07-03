@@ -26,7 +26,7 @@ interface WorkoutData {
   template: WorkoutTemplate
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
-  lastSetLogs: SetLog[]           // benchmark logs (pre-gap during comeback)
+  lastSetLogs: SetLog[]           // most recent completed session (display comparison)
   stalenessMap: Record<string, number>
   comeback: ComebackInfo | null
   // Maps primary exercise ID → its alternate ExerciseTemplate (preloaded)
@@ -392,14 +392,9 @@ function ExerciseCard({
 
   const barWeight = barWeightForType(exercise.bar_type)
 
-  // Current working weight for plate breakdown and collapsed summary
+  // Current working weight for the collapsed summary line
   const topSet = sets.find(s => s.set_type === 'top') ?? sets.find(s => s.set_type === 'working')
   const workingWeight = topSet?.actual_weight ?? topSet?.target_weight ?? null
-  const plates = barWeight !== null && workingWeight ? plateBreakdown(workingWeight, barWeight) : null
-
-  // Previous session's working weight
-  const prevTopSet = prevSets.find(s => s.set_type === 'top') ?? prevSets.find(s => s.set_type === 'working')
-  const prevWeight = prevTopSet?.actual_weight ?? null
 
   return (
     <div className={`bg-surface/80 border rounded-2xl overflow-hidden transition-opacity ${
@@ -686,16 +681,17 @@ export default function WorkoutScreen() {
         const recentSessions = await getRecentCompletedSessionsForTemplate(templateId, 10)
         const comeback = detectComeback(recentSessions)
 
-        let lastLogs: SetLog[]
-        if (comeback) {
-          // Use benchmark session's logs as the weight reference
-          lastLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
-        } else {
-          lastLogs = recentSessions[0] ? await getSetLogsForSession(recentSessions[0].id) : []
+        // Display comparison ("prev" / delta badges) always uses the most
+        // recent completed session; weight calculation uses the benchmark
+        // session (pre-gap peak) during a comeback.
+        const prevLogs = recentSessions[0] ? await getSetLogsForSession(recentSessions[0].id) : []
+        let benchmarkLogs = prevLogs
+        if (comeback && comeback.benchmarkSessionId !== recentSessions[0]?.id) {
+          benchmarkLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
         }
 
         session = await createSession(templateId)
-        const newLogs = initializeSession(exercises, lastLogs, comeback?.factor)
+        const newLogs = initializeSession(exercises, benchmarkLogs, comeback?.factor)
         setLogs = await createSetLogs(session.id, newLogs)
 
         navigate(`/workout/${session.id}`, { replace: true })
@@ -705,7 +701,7 @@ export default function WorkoutScreen() {
           buildStalenessMap(exercises2),
           loadAltExercises(exercises2),
         ])
-        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback, altExercises })
+        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: prevLogs, stalenessMap, comeback, altExercises })
         setNotes({})
       } else {
         if (!sessionId) throw new Error('No session ID')
@@ -724,13 +720,10 @@ export default function WorkoutScreen() {
         const recentSessions = await getRecentCompletedSessionsForTemplate(template.id, 10)
         const comeback = detectComeback(recentSessions)
 
-        let lastLogs: SetLog[]
-        if (comeback) {
-          lastLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
-        } else {
-          const firstRecent = recentSessions.find(s => s.id !== sessionId)
-          lastLogs = firstRecent ? await getSetLogsForSession(firstRecent.id) : []
-        }
+        // Resume path only needs logs for display comparison — always the
+        // most recent completed session (weights were already initialized).
+        const firstRecent = recentSessions.find(s => s.id !== sessionId)
+        const lastLogs = firstRecent ? await getSetLogsForSession(firstRecent.id) : []
 
         const [existingNotes, stalenessMap, altExercises] = await Promise.all([
           getExerciseNotes(sessionId),

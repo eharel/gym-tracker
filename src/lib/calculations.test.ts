@@ -473,7 +473,7 @@ describe('initializeSession', () => {
     })
   })
 
-  it('pre-fills actual_reps from the previous session by matching set_type + set_index', () => {
+  it('pre-fills working actual_reps from the previous session but leaves warmups blank', () => {
     const squat = makeExerciseTemplate()
     // Build realistic last-session logs with correct set_index values:
     // 4 warmups (0-3) + top (4) + backoff (5)
@@ -488,8 +488,9 @@ describe('initializeSession', () => {
 
     const sets = initializeSession([squat], lastSetLogs)
 
-    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 0)?.actual_reps).toBe(10)
-    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 3)?.actual_reps).toBe(1)
+    // Warmups are template-driven each session — no history carry-over
+    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 0)?.actual_reps).toBeNull()
+    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 3)?.actual_reps).toBeNull()
     expect(sets.find(s => s.set_type === 'top')?.actual_reps).toBe(3)
     expect(sets.find(s => s.set_type === 'backoff')?.actual_reps).toBe(9)
   })

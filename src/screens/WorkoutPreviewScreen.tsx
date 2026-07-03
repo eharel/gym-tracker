@@ -236,17 +236,18 @@ export default function WorkoutPreviewScreen() {
       const recentSessions = await getRecentCompletedSessionsForTemplate(id, 10)
       const comeback        = detectComeback(recentSessions)
 
-      let lastSetLogs: SetLog[]
-      if (comeback) {
-        lastSetLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
-      } else {
-        lastSetLogs = recentSessions[0]
-          ? await getSetLogsForSession(recentSessions[0].id)
-          : []
+      // Display ("prev") always reflects the most recent completed session;
+      // weight calculation uses the benchmark (pre-gap peak) during a comeback.
+      const lastSetLogs = recentSessions[0]
+        ? await getSetLogsForSession(recentSessions[0].id)
+        : []
+      let benchmarkLogs = lastSetLogs
+      if (comeback && comeback.benchmarkSessionId !== recentSessions[0]?.id) {
+        benchmarkLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
       }
 
       // Compute what the session would look like — no DB write
-      const sets = initializeSession(exercises, lastSetLogs, comeback?.factor)
+      const sets = initializeSession(exercises, benchmarkLogs, comeback?.factor)
 
       setData({ template, exercises, sets, lastSetLogs, comeback })
     } catch (e) {
