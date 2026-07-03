@@ -328,7 +328,7 @@ export function initializeSession(
             ),
             actual_weight: null,
             target_reps: String(ex.warmup_reps[i]),
-            actual_reps: getPrevRepsForSet(ex.id, 'warmup', idx, lastSetLogs),
+            actual_reps: null,
             is_weight_override: false,
             completed: false,
           })
@@ -346,7 +346,7 @@ export function initializeSession(
           ),
           actual_weight: null,
           target_reps: String(ex.warmup_db_reps ?? 10),
-          actual_reps: getPrevRepsForSet(ex.id, 'warmup', idx, lastSetLogs),
+          actual_reps: null,
           is_weight_override: false,
           completed: false,
         })
@@ -359,7 +359,7 @@ export function initializeSession(
           target_weight: ex.warmup_fixed_weight ?? 0,
           actual_weight: null,
           target_reps: String(ex.warmup_fixed_reps ?? 10),
-          actual_reps: getPrevRepsForSet(ex.id, 'warmup', idx, lastSetLogs),
+          actual_reps: null,
           is_weight_override: false,
           completed: false,
         })
