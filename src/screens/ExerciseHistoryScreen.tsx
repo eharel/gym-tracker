@@ -164,9 +164,11 @@ export default function ExerciseHistoryScreen() {
     return String(v)
   }
 
-  const backPath = templateId
-    ? `/program/exercise/${exerciseId}?templateId=${templateId}`
-    : `/program/exercise/${exerciseId}`
+  const backPath = searchParams.get('from') === 'progress'
+    ? '/progress'
+    : templateId
+      ? `/program/exercise/${exerciseId}?templateId=${templateId}`
+      : `/program/exercise/${exerciseId}`
 
   // ── Render ──────────────────────────────────────────────────────────────────
 

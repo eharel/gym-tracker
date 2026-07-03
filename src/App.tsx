@@ -12,6 +12,7 @@ import SessionsScreen from './screens/SessionsScreen'
 import SessionDetailScreen from './screens/SessionDetailScreen'
 import ExerciseHistoryScreen from './screens/ExerciseHistoryScreen'
 import WorkoutPreviewScreen from './screens/WorkoutPreviewScreen'
+import ProgressScreen from './screens/ProgressScreen'
 
 function App() {
   const loadSettings = useSettingsStore(s => s.load)
@@ -31,6 +32,7 @@ function App() {
         <Route path="/sessions/:sessionId" element={<SessionDetailScreen />} />
         <Route path="/workout/preview" element={<WorkoutPreviewScreen />} />
         <Route path="/program/exercise/:exerciseId/history" element={<ExerciseHistoryScreen />} />
+        <Route path="/progress" element={<ProgressScreen />} />
       </Routes>
     </BrowserRouter>
     </ErrorBoundary>

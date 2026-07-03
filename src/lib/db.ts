@@ -66,6 +66,30 @@ export async function getProgramExercises(programId: string): Promise<ExerciseTe
   return data as unknown as ExerciseTemplate[]
 }
 
+/** A completed top/working set log with its session's completion date attached. */
+export type ProgressLog = SetLog & { session_completed_at: string }
+
+/**
+ * All completed top/working set logs for the given exercises, from completed
+ * sessions only — one query for the whole progress overview.
+ */
+export async function getProgressLogs(exerciseIds: string[]): Promise<ProgressLog[]> {
+  if (exerciseIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('set_logs')
+    .select('*, sessions!inner(completed_at)')
+    .in('exercise_template_id', exerciseIds)
+    .in('set_type', ['top', 'working'])
+    .eq('completed', true)
+    .not('sessions.completed_at', 'is', null)
+  if (error) throw error
+  type Row = SetLog & { sessions: { completed_at: string } }
+  return (data as unknown as Row[]).map(({ sessions, ...log }) => ({
+    ...log,
+    session_completed_at: sessions.completed_at,
+  }))
+}
+
 export async function upsertExerciseTemplate(
   template: Omit<ExerciseTemplate, 'id' | 'created_at'> & { id?: string },
 ): Promise<ExerciseTemplate> {

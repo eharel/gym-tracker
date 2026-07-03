@@ -346,6 +346,17 @@ export default function HomeScreen() {
             <h1 className="text-2xl sm:text-3xl font-bold text-ink">Gym Tracker</h1>
             <p className="text-sm text-ink-secondary mt-0.5">{data.program.name}</p>
           </div>
+          <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/progress')}
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-surface border border-edge text-ink-secondary hover:text-ink hover:border-edge-strong transition-colors active:opacity-70"
+            aria-label="Progress"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+              <polyline points="16 7 22 7 22 13" />
+            </svg>
+          </button>
           <button
             onClick={() => navigate('/sessions')}
             className="w-10 h-10 flex items-center justify-center rounded-xl bg-surface border border-edge text-ink-secondary hover:text-ink hover:border-edge-strong transition-colors active:opacity-70"
@@ -367,6 +378,7 @@ export default function HomeScreen() {
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
+          </div>
         </div>
 
         {/* Resume banner */}
