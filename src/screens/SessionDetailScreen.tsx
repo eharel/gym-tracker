@@ -73,13 +73,15 @@ function buildGCalUrl(meta: SessionMeta, exerciseLogs: ExerciseLog[], unitLabel:
   const start = fmt(meta.started_at)
   const end   = meta.completed_at ? fmt(meta.completed_at) : fmt(meta.started_at)
 
-  const exerciseLines = exerciseLogs.map(({ exercise, sets }) => {
+  // Exercises with no completed working sets were skipped — leave them out;
+  // the calendar entry records what was actually done.
+  const exerciseLines = exerciseLogs.flatMap(({ exercise, sets }) => {
     const working = sets.filter(s => s.set_type !== 'warmup' && s.completed)
-    if (working.length === 0) return exercise.name
+    if (working.length === 0) return []
     const topSet = working[0]
     const w = topSet.actual_weight ?? topSet.target_weight
     const r = topSet.actual_reps ?? topSet.target_reps
-    return w ? `${exercise.name}: ${w} ${unitLabel} × ${r ?? '?'}` : exercise.name
+    return [w ? `${exercise.name}: ${w} ${unitLabel} × ${r ?? '?'}` : exercise.name]
   })
 
   const details = exerciseLines.join('\n')
