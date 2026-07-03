@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS user_settings (
 );
 
 -- Seed one row if the table is empty (idempotent)
-INSERT INTO user_settings DEFAULT VALUES
-  ON CONFLICT DO NOTHING;
+INSERT INTO user_settings (unit_system)
+SELECT 'imperial'
+WHERE NOT EXISTS (SELECT 1 FROM user_settings);
 
 -- ── Program: configurable highlight exercise ────────────────────────────────
 -- Replaces the hard-coded Squat UUID in getHomeStats. Each program can
