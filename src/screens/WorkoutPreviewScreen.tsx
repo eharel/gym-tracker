@@ -106,7 +106,8 @@ function PreviewSetRow({
   const { label, cls } = setTypeMeta(set.set_type)
   const isBar     = barWeight !== null && set.set_type === 'warmup' && set.target_weight === barWeight
   const plates    = barWeight !== null && !isBar && set.target_weight ? plateBreakdown(set.target_weight, barWeight) : null
-  const warmupPct = set.set_type === 'warmup' && barWeight !== null && workingWeight && set.target_weight
+  const pctOfTop = (set.set_type === 'warmup' || set.set_type === 'backoff') &&
+    barWeight !== null && workingWeight && set.target_weight
     ? Math.round((set.target_weight / workingWeight) * 100)
     : null
 
@@ -122,9 +123,9 @@ function PreviewSetRow({
         <span className="text-sm font-medium text-ink tabular-nums">
           {isBar ? 'Bar' : set.target_weight != null ? `${set.target_weight}` : '—'}
         </span>
-        {(plates || warmupPct !== null) && (
+        {(plates || pctOfTop !== null) && (
           <span className="text-xs text-ink-disabled tabular-nums leading-tight">
-            {[plates, warmupPct !== null ? `${warmupPct}%` : null].filter(Boolean).join(' · ')}
+            {[plates, pctOfTop !== null ? `${pctOfTop}%` : null].filter(Boolean).join(' · ')}
           </span>
         )}
       </div>

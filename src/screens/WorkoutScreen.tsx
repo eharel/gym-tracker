@@ -200,9 +200,9 @@ function SetRow({
   const isBar = barWeight !== null && isWarmup && log.target_weight === barWeight
   // Per-set plate breakdown — skip the "Bar" row (no plates needed) and blank weights
   const plateStr = barWeight !== null && !isBar && numericWeight ? plateBreakdown(numericWeight, barWeight) : null
-  // Warmup percentage of working/top-set weight
-  const warmupPct =
-    isWarmup && barWeight !== null && topSetWeight && numericWeight
+  // Percentage of the top-set weight, shown for warmup and backoff sets
+  const pctOfTop =
+    (isWarmup || log.set_type === 'backoff') && barWeight !== null && topSetWeight && numericWeight
       ? Math.round((numericWeight / topSetWeight) * 100)
       : null
 
@@ -210,15 +210,17 @@ function SetRow({
   const weightSubLabel = !isWarmup ? (
     <>
       <DeltaBadge current={numericWeight} previous={prevLog ? (prevLog.actual_weight ?? prevLog.target_weight) : null} />
-      {plateStr && (
-        <span className="text-xs text-ink-disabled tabular-nums leading-tight text-center">{plateStr}</span>
+      {(plateStr || pctOfTop !== null) && (
+        <span className="text-xs text-ink-disabled tabular-nums leading-tight text-center">
+          {[plateStr, pctOfTop !== null ? `${pctOfTop}%` : null].filter(Boolean).join(' · ')}
+        </span>
       )}
     </>
   ) : isBelowTarget ? (
     <span className="text-xs text-caution tabular-nums">target {log.target_weight}</span>
-  ) : (plateStr || warmupPct !== null) ? (
+  ) : (plateStr || pctOfTop !== null) ? (
     <span className="text-xs text-ink-disabled tabular-nums leading-tight text-center">
-      {[plateStr, warmupPct !== null ? `${warmupPct}%` : null].filter(Boolean).join(' · ')}
+      {[plateStr, pctOfTop !== null ? `${pctOfTop}%` : null].filter(Boolean).join(' · ')}
     </span>
   ) : null
 
