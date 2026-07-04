@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useUnit } from '../lib/units'
+import { buildGCalUrl } from '../lib/gcal'
 import { getExerciseTemplates, getSetLogsForSession, updateSessionTimes } from '../lib/db'
 import type { ExerciseTemplate, SetLog } from '../types'
 import { supabase } from '../lib/supabase'
@@ -65,34 +66,6 @@ function fromLocalInput(value: string): string {
   return new Date(value).toISOString()
 }
 
-// Build a Google Calendar "quick add" URL pre-filled with the session details
-function buildGCalUrl(meta: SessionMeta, exerciseLogs: ExerciseLog[], unitLabel: string): string {
-  // GCal expects UTC: YYYYMMDDTHHMMSSZ
-  const fmt = (iso: string) =>
-    new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
-  const start = fmt(meta.started_at)
-  const end   = meta.completed_at ? fmt(meta.completed_at) : fmt(meta.started_at)
-
-  // Exercises with no completed working sets were skipped — leave them out;
-  // the calendar entry records what was actually done.
-  const exerciseLines = exerciseLogs.flatMap(({ exercise, sets }) => {
-    const working = sets.filter(s => s.set_type !== 'warmup' && s.completed)
-    if (working.length === 0) return []
-    const topSet = working[0]
-    const w = topSet.actual_weight ?? topSet.target_weight
-    const r = topSet.actual_reps ?? topSet.target_reps
-    return [w ? `${exercise.name}: ${w} ${unitLabel} × ${r ?? '?'}` : exercise.name]
-  })
-
-  const details = exerciseLines.join('\n')
-  const params = new URLSearchParams({
-    action:  'TEMPLATE',
-    text:    meta.template_name,
-    dates:   `${start}/${end}`,
-    details,
-  })
-  return `https://calendar.google.com/calendar/render?${params}`
-}
 
 // ─── Edit Times Modal ─────────────────────────────────────────────────────────
 
@@ -400,7 +373,13 @@ export default function SessionDetailScreen() {
         {/* Add to Google Calendar */}
         {meta.completed_at && (
           <a
-            href={buildGCalUrl(meta, exerciseLogs, unit.label)}
+            href={buildGCalUrl({
+              title: meta.template_name,
+              startedAt: meta.started_at,
+              completedAt: meta.completed_at,
+              exercises: exerciseLogs.map(({ exercise, sets }) => ({ name: exercise.name, sets })),
+              unitLabel: unit.label,
+            })}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-center gap-2 w-full border border-edge rounded-2xl py-3.5 text-sm font-medium text-ink-secondary hover:text-ink hover:border-edge-strong active:opacity-70 transition-colors"
