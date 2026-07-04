@@ -185,14 +185,16 @@ function SetRow({
     numericWeight !== null &&
     numericWeight < log.target_weight
 
-  // Reps are pre-filled from the previous session. Track whether the user has
-  // touched the field yet: prefilled = muted + show target range; edited = normal + show delta.
+  // Reps are pre-filled (working sets: from last session; warmups: from the
+  // template prescription). Track whether the user has touched the field yet:
+  // prefilled = muted + show target range; edited = normal + show delta.
   const [isPrefilled, setIsPrefilled] = useState(
     () =>
       !log.completed &&
-      prevLog !== null &&
       log.actual_reps !== null &&
-      log.actual_reps === prevLog.actual_reps,
+      (isWarmup
+        ? String(log.actual_reps) === log.target_reps
+        : prevLog !== null && log.actual_reps === prevLog.actual_reps),
   )
 
   const isBar = barWeight !== null && isWarmup && log.target_weight === barWeight

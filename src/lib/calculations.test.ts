@@ -473,24 +473,26 @@ describe('initializeSession', () => {
     })
   })
 
-  it('pre-fills working actual_reps from the previous session but leaves warmups blank', () => {
+  it('pre-fills working actual_reps from last session and warmups from the prescription', () => {
     const squat = makeExerciseTemplate()
     // Build realistic last-session logs with correct set_index values:
     // 4 warmups (0-3) + top (4) + backoff (5)
     const lastSetLogs = [
-      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 0, actual_reps: 10 }),
-      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 1, actual_reps: 5 }),
-      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 2, actual_reps: 3 }),
-      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 3, actual_reps: 1 }),
+      // Logged reps deliberately differ from the [10, 5, 3, 1] prescription
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 0, actual_reps: 12 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 1, actual_reps: 6 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 2, actual_reps: 4 }),
+      makeSetLog({ exercise_template_id: 'ex-id', set_type: 'warmup', set_index: 3, actual_reps: 2 }),
       makeSetLog({ exercise_template_id: 'ex-id', set_type: 'top',    set_index: 4, actual_weight: 290, actual_reps: 3 }),
       makeSetLog({ exercise_template_id: 'ex-id', set_type: 'backoff', set_index: 5, actual_reps: 9 }),
     ]
 
     const sets = initializeSession([squat], lastSetLogs)
 
-    // Warmups are template-driven each session — no history carry-over
-    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 0)?.actual_reps).toBeNull()
-    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 3)?.actual_reps).toBeNull()
+    // Warmups pre-fill from the template prescription (not history):
+    // fixture prescribes [10, 5, 3, 1], last session logged different reps
+    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 0)?.actual_reps).toBe(10)
+    expect(sets.find(s => s.set_type === 'warmup' && s.set_index === 3)?.actual_reps).toBe(1)
     expect(sets.find(s => s.set_type === 'top')?.actual_reps).toBe(3)
     expect(sets.find(s => s.set_type === 'backoff')?.actual_reps).toBe(9)
   })

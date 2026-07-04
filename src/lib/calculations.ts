@@ -328,7 +328,9 @@ export function initializeSession(
             ),
             actual_weight: null,
             target_reps: String(ex.warmup_reps[i]),
-            actual_reps: null,
+            // Warmup reps pre-fill from the prescription itself (not history):
+            // one checkbox tap logs the set, no typing
+            actual_reps: ex.warmup_reps[i],
             is_weight_override: false,
             completed: false,
           })
@@ -346,7 +348,7 @@ export function initializeSession(
           ),
           actual_weight: null,
           target_reps: String(ex.warmup_db_reps ?? 10),
-          actual_reps: null,
+          actual_reps: ex.warmup_db_reps ?? 10,
           is_weight_override: false,
           completed: false,
         })
@@ -359,7 +361,7 @@ export function initializeSession(
           target_weight: ex.warmup_fixed_weight ?? 0,
           actual_weight: null,
           target_reps: String(ex.warmup_fixed_reps ?? 10),
-          actual_reps: null,
+          actual_reps: ex.warmup_fixed_reps ?? 10,
           is_weight_override: false,
           completed: false,
         })
