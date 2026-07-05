@@ -85,7 +85,7 @@ function SegmentedControl<T extends string>({
             'flex-1 py-2 text-xs font-semibold transition-colors',
             i > 0 ? 'border-l border-edge' : '',
             value === opt.value
-              ? 'bg-accent text-white'
+              ? 'bg-accent text-on-accent'
               : 'text-ink-secondary active:opacity-70',
           ].join(' ')}
         >

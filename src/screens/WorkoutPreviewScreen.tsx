@@ -396,7 +396,7 @@ export default function WorkoutPreviewScreen() {
       <div className="fixed bottom-0 inset-x-0 px-4 pb-8 pt-3 bg-gradient-to-t from-base via-base/90 to-transparent pointer-events-none">
         <button
           onClick={handleStart}
-          className="w-full max-w-md mx-auto block bg-accent text-white font-bold rounded-2xl py-4 text-base active:opacity-80 transition-opacity shadow-card pointer-events-auto"
+          className="w-full max-w-md mx-auto block bg-accent text-on-accent font-bold rounded-2xl py-4 text-base active:opacity-80 transition-opacity shadow-card pointer-events-auto"
         >
           Start Workout
         </button>

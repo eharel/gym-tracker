@@ -4,13 +4,16 @@ import { getActiveProgram, getWorkoutTemplates } from '../lib/db'
 import { useSettingsStore } from '../store/settings'
 import { useProfileStore } from '../store/profile'
 import { useUnit } from '../lib/units'
+import { DEFAULT_THEME, THEMES } from '../lib/themes'
 import type { Program, WorkoutTemplate, UnitSystem } from '../types'
 
 export default function ProgramScreen() {
   const navigate = useNavigate()
   const unit = useUnit()
   const updateSettings = useSettingsStore(s => s.update)
+  const currentTheme = useSettingsStore(s => s.settings?.theme ?? DEFAULT_THEME)
   const [savingUnit, setSavingUnit] = useState(false)
+  const [savingTheme, setSavingTheme] = useState(false)
   const switchProfile = useProfileStore(s => s.switchProfile)
   const profileName = useProfileStore(
     s => s.profiles.find(p => p.id === s.currentProfileId)?.name ?? '',
@@ -24,6 +27,12 @@ export default function ProgramScreen() {
     setSavingUnit(true)
     try { await updateSettings({ unit_system: value }) }
     finally { setSavingUnit(false) }
+  }
+
+  async function handleThemeChange(value: string) {
+    setSavingTheme(true)
+    try { await updateSettings({ theme: value }) }
+    finally { setSavingTheme(false) }
   }
 
   useEffect(() => {
@@ -119,6 +128,27 @@ export default function ProgramScreen() {
           </div>
           <div className="bg-surface/80 border border-edge rounded-2xl px-4 py-4 flex items-center justify-between gap-4 shadow-card">
             <div>
+              <p className="font-semibold text-ink text-sm">Theme</p>
+              <p className="text-xs text-ink-disabled mt-0.5">Colors across the app</p>
+            </div>
+            <div className={`flex bg-elevated border border-edge rounded-xl overflow-hidden shrink-0 ${savingTheme ? 'opacity-50 pointer-events-none' : ''}`}>
+              {THEMES.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => handleThemeChange(t.id)}
+                  className={`px-3.5 py-2 text-sm font-semibold transition-colors ${
+                    currentTheme === t.id
+                      ? 'bg-accent text-on-accent'
+                      : 'text-ink-secondary active:opacity-70'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="bg-surface/80 border border-edge rounded-2xl px-4 py-4 flex items-center justify-between gap-4 shadow-card">
+            <div>
               <p className="font-semibold text-ink text-sm">Weight unit</p>
               <p className="text-xs text-ink-disabled mt-0.5">Used throughout the app</p>
             </div>
@@ -129,7 +159,7 @@ export default function ProgramScreen() {
                   onClick={() => handleUnitChange(sys)}
                   className={`px-3.5 py-2 text-sm font-semibold transition-colors ${
                     unit.system === sys
-                      ? 'bg-accent text-white'
+                      ? 'bg-accent text-on-accent'
                       : 'text-ink-secondary active:opacity-70'
                   }`}
                 >

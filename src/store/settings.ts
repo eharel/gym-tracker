@@ -8,7 +8,7 @@ interface SettingsState {
   /** Which profile the settings were loaded for — reloads on switch. */
   loadedFor: string | null
   load: () => Promise<void>
-  update: (patch: Partial<Pick<UserSettings, 'unit_system'>>) => Promise<void>
+  update: (patch: Partial<Pick<UserSettings, 'unit_system' | 'theme'>>) => Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({

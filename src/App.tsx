@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSettingsStore } from './store/settings'
 import { useProfileStore } from './store/profile'
+import { applyTheme, DEFAULT_THEME } from './lib/themes'
 import ProfilePickerScreen from './screens/ProfilePickerScreen'
 import HomeScreen from './screens/HomeScreen'
 import WorkoutScreen from './screens/WorkoutScreen'
@@ -27,6 +28,10 @@ function App() {
   useEffect(() => {
     if (currentProfileId) loadSettings()
   }, [currentProfileId, loadSettings])
+
+  // Theme follows the loaded settings (and switches instantly on update)
+  const theme = useSettingsStore(s => s.settings?.theme ?? DEFAULT_THEME)
+  useEffect(() => { applyTheme(theme) }, [theme])
 
   if (!profilesLoaded) {
     return (

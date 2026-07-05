@@ -348,7 +348,7 @@ export default function SummaryScreen() {
           <button
             onClick={handleDone}
             disabled={saving}
-            className="w-full bg-accent text-white font-bold rounded-2xl py-4 min-h-touch text-base active:opacity-80 transition-opacity disabled:opacity-50 shadow-card"
+            className="w-full bg-accent text-on-accent font-bold rounded-2xl py-4 min-h-touch text-base active:opacity-80 transition-opacity disabled:opacity-50 shadow-card"
           >
             {saving ? 'Saving…' : 'Done'}
           </button>

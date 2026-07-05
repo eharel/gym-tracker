@@ -12,6 +12,8 @@ export interface UserSettings {
   id: string
   profile_id: string
   unit_system: UnitSystem
+  /** Theme id from src/lib/themes.ts; unknown values fall back to default. */
+  theme: string
   created_at: string
   updated_at: string
 }

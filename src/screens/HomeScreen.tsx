@@ -87,7 +87,7 @@ function NextWorkoutCard({
 
       <button
         onClick={onBegin}
-        className="w-full bg-accent hover:bg-accent/90 text-white font-bold rounded-xl py-3.5 min-h-touch transition-colors active:scale-[0.98] transition-transform text-base tracking-wide shadow-card"
+        className="w-full bg-accent hover:bg-accent/90 text-on-accent font-bold rounded-xl py-3.5 min-h-touch transition-colors active:scale-[0.98] transition-transform text-base tracking-wide shadow-card"
       >
         Preview Workout
       </button>
@@ -354,7 +354,7 @@ export default function HomeScreen() {
           <button
             onClick={handleCreateProgram}
             disabled={creating}
-            className="bg-accent text-white font-bold rounded-2xl py-3.5 text-base active:opacity-80 disabled:opacity-50 shadow-card"
+            className="bg-accent text-on-accent font-bold rounded-2xl py-3.5 text-base active:opacity-80 disabled:opacity-50 shadow-card"
           >
             {creating ? 'Creating…' : 'Create my program'}
           </button>

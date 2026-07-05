@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react'
 
-// ─── Design tokens (must match index.css) ────────────────────────────────────
-const ACCENT        = '#f97316'
-const EDGE          = '#2e2e45'
-const INK           = '#ededf5'
-const INK_SEC       = '#8888a8'
-const INK_DIS       = '#454560'
-const ELEVATED      = '#1c1c2e'
+// ─── Design tokens — SVG fill/stroke accept CSS variables, so the chart
+//     follows the active theme automatically ─────────────────────────────────
+const ACCENT        = 'var(--color-accent)'
+const EDGE          = 'var(--color-edge)'
+const INK           = 'var(--color-ink)'
+const INK_SEC       = 'var(--color-ink-secondary)'
+const INK_DIS       = 'var(--color-ink-disabled)'
+const ELEVATED      = 'var(--color-elevated)'
 
 // ─── Chart geometry ───────────────────────────────────────────────────────────
 const VW = 320

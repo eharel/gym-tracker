@@ -108,7 +108,7 @@ export default function RestTimer({ startSignal = 0 }: { startSignal?: number })
               onClick={() => selectPreset(p.seconds)}
               className={`text-xs font-semibold px-3.5 py-2 rounded-xl border shadow-card transition-colors
                 ${duration === p.seconds
-                  ? 'bg-accent text-white border-accent'
+                  ? 'bg-accent text-on-accent border-accent'
                   : 'bg-surface/95 backdrop-blur text-ink-secondary border-edge active:opacity-70'
                 }`}
             >

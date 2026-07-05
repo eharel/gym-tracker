@@ -68,7 +68,7 @@ export default function ProfilePickerScreen() {
             <button
               onClick={handleAdd}
               disabled={!name.trim() || saving}
-              className="bg-accent text-white font-semibold text-sm rounded-xl px-4 disabled:opacity-40 active:opacity-80"
+              className="bg-accent text-on-accent font-semibold text-sm rounded-xl px-4 disabled:opacity-40 active:opacity-80"
             >
               {saving ? '…' : 'Add'}
             </button>

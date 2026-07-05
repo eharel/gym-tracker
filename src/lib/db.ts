@@ -409,7 +409,7 @@ export async function getUserSettings(): Promise<UserSettings | null> {
 }
 
 export async function upsertUserSettings(
-  patch: Partial<Pick<UserSettings, 'unit_system'>>,
+  patch: Partial<Pick<UserSettings, 'unit_system' | 'theme'>>,
 ): Promise<UserSettings> {
   // One row per profile (unique index on profile_id); creates it on first
   // write for a new profile. updated_at is bumped manually — no DB trigger.

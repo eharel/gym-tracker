@@ -226,7 +226,7 @@ export default function ExerciseHistoryScreen() {
                     'flex-1 py-2 text-xs font-semibold transition-colors',
                     i > 0 ? 'border-l border-edge' : '',
                     metric === tab.key
-                      ? 'bg-accent text-white'
+                      ? 'bg-accent text-on-accent'
                       : tab.disabled
                         ? 'text-ink-disabled cursor-not-allowed'
                         : 'text-ink-secondary active:opacity-70',

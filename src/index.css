@@ -22,8 +22,14 @@
   /* ─── Accent ────────────────────────────────────────────
      Orange — energetic, readable on dark surfaces.
      Use accent/10 or accent/15 (Tailwind opacity modifier) for
-     tinted backgrounds instead of a separate muted token.         */
+     tinted backgrounds instead of a separate muted token.
+     on-accent = text/icons sitting on a solid accent fill.        */
   --color-accent: #f97316;
+  --color-on-accent: #ffffff;
+
+  /* ─── Ambience ──────────────────────────────────────────
+     glow feeds the body's radial gradient.                        */
+  --color-glow: #1a1a35;
 
   /* ─── Semantic ──────────────────────────────────────────
      positive  = progression earned / success
@@ -66,7 +72,7 @@
   body {
     min-height: 100vh;
     /* Subtle radial glow at the top — gives depth on both mobile and desktop */
-    background: radial-gradient(ellipse 120% 50% at 50% 0%, #1a1a35 0%, var(--color-canvas) 65%);
+    background: radial-gradient(ellipse 120% 50% at 50% 0%, var(--color-glow) 0%, var(--color-canvas) 65%);
   }
 
   input,
@@ -74,4 +80,42 @@
   textarea {
     font-size: 1rem;
   }
+}
+
+/* ─── Themes ──────────────────────────────────────────────────────────────────
+   The @theme block above is the default theme ("Ember"). Each block below
+   overrides the same variables for one theme; every Tailwind utility follows
+   automatically. To add a theme:
+     1. add a :root[data-theme='<id>'] block here
+     2. register the id + label in src/lib/themes.ts
+   Semantic colors (positive/caution/negative) stay constant across themes.  */
+
+:root[data-theme='ocean'] {
+  --color-canvas:        #070b13;
+  --color-surface:       #0f1624;
+  --color-elevated:      #172236;
+  --color-overlay:       #1f2e48;
+  --color-edge:          #263551;
+  --color-edge-strong:   #3b5174;
+  --color-ink:           #eaf1fa;
+  --color-ink-secondary: #8296b4;
+  --color-ink-disabled:  #435577;
+  --color-accent:        #38bdf8;
+  --color-on-accent:     #062a3f;
+  --color-glow:          #142647;
+}
+
+:root[data-theme='rose'] {
+  --color-canvas:        #0e0910;
+  --color-surface:       #191220;
+  --color-elevated:      #241a2e;
+  --color-overlay:       #2f2340;
+  --color-edge:          #3a2c4a;
+  --color-edge-strong:   #55416b;
+  --color-ink:           #f4edf5;
+  --color-ink-secondary: #a48bb0;
+  --color-ink-disabled:  #5c4570;
+  --color-accent:        #fb7185;
+  --color-on-accent:     #40060f;
+  --color-glow:          #331a35;
 }

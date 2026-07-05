@@ -151,7 +151,7 @@ function EditTimesModal({
           <button
             onClick={handleSave}
             disabled={saving || !startVal}
-            className="flex-1 bg-accent text-white font-semibold rounded-xl py-3 text-sm active:opacity-80 disabled:opacity-50"
+            className="flex-1 bg-accent text-on-accent font-semibold rounded-xl py-3 text-sm active:opacity-80 disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
