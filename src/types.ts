@@ -54,6 +54,9 @@ export interface ExerciseTemplate {
 
   bar_type: BarType
   alternate_exercise_id: string | null
+  /** Lives in a template for ownership/history, but only renders when
+   *  swapped in as another exercise's alternate. */
+  is_alternate_only: boolean
 
   warmup_rule: WarmupRule
   warmup_percentages: number[] | null

@@ -232,7 +232,8 @@ export default function WorkoutPreviewScreen() {
       const program   = await getActiveProgram()
       const templates = await getWorkoutTemplates(program?.id ?? '')
       const template  = templates.find(t => t.id === id) ?? templates[0]
-      const exercises = await getExerciseTemplates(id)
+      // Alternate-only exercises only appear when swapped in mid-workout
+      const exercises = (await getExerciseTemplates(id)).filter(e => !e.is_alternate_only)
 
       const recentSessions = await getRecentCompletedSessionsForTemplate(id, 10)
       const comeback        = detectComeback(recentSessions)

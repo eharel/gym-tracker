@@ -97,6 +97,7 @@ export default function TemplateEditorScreen() {
       is_optional: false,
       bar_type: 'none',
       alternate_exercise_id: null,
+      is_alternate_only: false,
       warmup_rule: 'none',
       warmup_percentages: null,
       warmup_reps: null,
@@ -242,7 +243,14 @@ export default function TemplateEditorScreen() {
                 onClick={() => navigate(`/program/exercise/${ex.id}?templateId=${templateId}`)}
                 className="flex-1 min-w-0 text-left active:opacity-70"
               >
-                <p className="font-semibold text-sm text-ink truncate">{ex.name}</p>
+                <p className="font-semibold text-sm text-ink truncate">
+                  {ex.name}
+                  {ex.is_alternate_only && (
+                    <span className="ml-1.5 text-xs font-medium text-ink-disabled bg-elevated border border-edge rounded px-1.5 py-0.5 align-middle">
+                      Alt only
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-ink-disabled mt-0.5">
                   {ex.working_set_type === 'top_set'
                     ? `Top set${ex.backoff_set_count > 0 ? ` + ${ex.backoff_set_count} back-off` : ''}`

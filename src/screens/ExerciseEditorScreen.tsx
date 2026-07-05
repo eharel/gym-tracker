@@ -159,6 +159,9 @@ export default function ExerciseEditorScreen() {
   // Alternate exercise
   const [alternateExerciseId, setAlternateExerciseId] = useState<string | null>(null)
   const [programExercises, setProgramExercises] = useState<ExerciseTemplate[]>([])
+  const [creatingAlt, setCreatingAlt] = useState(false)
+  const [newAltName, setNewAltName] = useState('')
+  const [savingAlt, setSavingAlt] = useState(false)
 
   // Bar type
   const [barType, setBarType] = useState<BarType>('none')
@@ -268,6 +271,7 @@ export default function ExerciseEditorScreen() {
 
       bar_type: barType,
       alternate_exercise_id: alternateExerciseId,
+      is_alternate_only: exercise?.is_alternate_only ?? false,
 
       warmup_rule: warmupRule,
       warmup_percentages: warmupRule === 'percentage_of_top_set' ? parseNumbers(warmupPercentages) : null,
@@ -289,6 +293,43 @@ export default function ExerciseEditorScreen() {
       rounding_increment: Number(roundingIncrement) || 5,
     }
     return { ...base, ...overrides }
+  }
+
+  // Creates a hidden alternate-only exercise (same template, copies this
+  // exercise's set scheme) and links it as the alternate in one step.
+  async function handleCreateAlternate() {
+    const trimmed = newAltName.trim()
+    if (!trimmed || !exercise || savingAlt) return
+    setSavingAlt(true)
+    try {
+      const alt = await upsertExerciseTemplate({
+        workout_template_id: exercise.workout_template_id,
+        position: 999,
+        ...buildPayload({
+          name: trimmed,
+          notes: null,
+          superset_group: null,
+          is_optional: false,
+          bar_type: 'none',
+          alternate_exercise_id: null,
+          is_alternate_only: true,
+          warmup_rule: 'none',
+          warmup_percentages: null,
+          warmup_reps: null,
+          warmup_db_percentage: null,
+          warmup_db_reps: null,
+          warmup_fixed_weight: null,
+          warmup_fixed_reps: null,
+        }),
+      })
+      setProgramExercises(prev => [...prev, alt])
+      setAlternateExerciseId(alt.id)
+      scheduleSave({ alternate_exercise_id: alt.id })
+      setCreatingAlt(false)
+      setNewAltName('')
+    } finally {
+      setSavingAlt(false)
+    }
   }
 
   function scheduleSave(overrides: Partial<DraftExercise> = {}) {
@@ -406,28 +447,53 @@ export default function ExerciseEditorScreen() {
             label="Optional exercise"
           />
 
-          {programExercises.length > 0 && (
-            <FieldGroup>
-              <Label>Alternate exercise</Label>
-              <select
-                value={alternateExerciseId ?? ''}
-                onChange={e => {
-                  const val = e.target.value || null
-                  setAlternateExerciseId(val)
-                  scheduleSave({ alternate_exercise_id: val })
-                }}
-                className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-accent transition-colors appearance-none"
+          <FieldGroup>
+            <Label>Alternate exercise</Label>
+            <select
+              value={alternateExerciseId ?? ''}
+              onChange={e => {
+                const val = e.target.value || null
+                setAlternateExerciseId(val)
+                scheduleSave({ alternate_exercise_id: val })
+              }}
+              className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-accent transition-colors appearance-none"
+            >
+              <option value="">None</option>
+              {programExercises.map(ex => (
+                <option key={ex.id} value={ex.id}>{ex.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-ink-disabled">
+              Shown as a quick-swap option during workouts when this exercise can't be performed.
+            </p>
+            {creatingAlt ? (
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={newAltName}
+                  onChange={e => setNewAltName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreateAlternate() }}
+                  placeholder="e.g. DB Curls"
+                  className="flex-1 bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-ink-disabled outline-none focus:border-accent transition-colors"
+                />
+                <button
+                  onClick={handleCreateAlternate}
+                  disabled={!newAltName.trim() || savingAlt}
+                  className="bg-accent text-on-accent font-semibold text-sm rounded-xl px-4 disabled:opacity-40 active:opacity-80"
+                >
+                  {savingAlt ? '…' : 'Create'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setCreatingAlt(true)}
+                className="text-xs text-ink-secondary underline underline-offset-4 self-start active:opacity-70"
               >
-                <option value="">None</option>
-                {programExercises.map(ex => (
-                  <option key={ex.id} value={ex.id}>{ex.name}</option>
-                ))}
-              </select>
-              <p className="text-xs text-ink-disabled">
-                Shown as a quick-swap option during workouts when this exercise can't be performed.
-              </p>
-            </FieldGroup>
-          )}
+                + New alternate-only exercise
+              </button>
+            )}
+          </FieldGroup>
         </SectionCard>
 
         {/* ── Working sets ─────────────────────────────────────────────────── */}

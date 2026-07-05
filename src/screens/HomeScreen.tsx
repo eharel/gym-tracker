@@ -292,7 +292,7 @@ export default function HomeScreen() {
       ])
 
       const nextTemplate = getNextWorkoutTemplate(sessions, templates)
-      const nextExercises = await getExerciseTemplates(nextTemplate.id)
+      const nextExercises = (await getExerciseTemplates(nextTemplate.id)).filter(e => !e.is_alternate_only)
 
       const lastSession = sessions[0] ?? null
       const lastTemplate = lastSession

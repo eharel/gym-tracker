@@ -679,7 +679,9 @@ export default function WorkoutScreen() {
         )
         template = templates.find(t => t.id === templateId) ?? templates[0]
 
-        const exercises = await getExerciseTemplates(templateId)
+        // Alternate-only exercises never render directly (and get no set
+        // logs at init) — they enter a session via the swap button only
+        const exercises = (await getExerciseTemplates(templateId)).filter(e => !e.is_alternate_only)
 
         // ── Comeback detection ─────────────────────────────────────────────
         const recentSessions = await getRecentCompletedSessionsForTemplate(templateId, 10)
@@ -700,7 +702,7 @@ export default function WorkoutScreen() {
 
         navigate(`/workout/${session.id}`, { replace: true })
 
-        const exercises2 = await getExerciseTemplates(templateId)
+        const exercises2 = (await getExerciseTemplates(templateId)).filter(e => !e.is_alternate_only)
         const [stalenessMap, altExercises] = await Promise.all([
           buildStalenessMap(exercises2),
           loadAltExercises(exercises2),
@@ -717,7 +719,7 @@ export default function WorkoutScreen() {
         const templates = await getWorkoutTemplates(program?.id ?? '')
         template = templates.find(t => t.id === session.workout_template_id) ?? templates[0]
 
-        const exercises = await getExerciseTemplates(template.id)
+        const exercises = (await getExerciseTemplates(template.id)).filter(e => !e.is_alternate_only)
         setLogs = await getSetLogsForSession(sessionId)
 
         // ── Comeback detection (resume path) ──────────────────────────────

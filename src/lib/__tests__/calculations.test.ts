@@ -26,6 +26,7 @@ function makeEx(overrides?: Partial<ExerciseTemplate>): ExerciseTemplate {
     is_optional: false,
     bar_type: 'none',
     alternate_exercise_id: null,
+    is_alternate_only: false,
     warmup_rule: 'none',
     warmup_percentages: null,
     warmup_reps: null,
