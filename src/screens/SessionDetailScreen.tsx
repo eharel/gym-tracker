@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useUnit } from '../lib/units'
 import { buildGCalUrl } from '../lib/gcal'
-import { getExerciseTemplates, getSetLogsForSession, updateSessionTimes } from '../lib/db'
+import { getExerciseTemplates, getSetLogsForSession, reopenSession, updateSessionTimes } from '../lib/db'
 import type { ExerciseTemplate, SetLog } from '../types'
 import { supabase } from '../lib/supabase'
 
@@ -172,6 +172,21 @@ export default function SessionDetailScreen() {
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([])
   const [error, setError] = useState<string | null>(null)
   const [editingTime, setEditingTime] = useState(false)
+  const [reopening, setReopening] = useState(false)
+
+  // Clears completed_at and drops back into the live workout screen —
+  // completing it again (with the original notes intact) closes it back up
+  async function handleReopen() {
+    if (!sessionId || reopening) return
+    setReopening(true)
+    try {
+      await reopenSession(sessionId)
+      navigate(`/workout/${sessionId}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to reopen session')
+      setReopening(false)
+    }
+  }
 
   async function load(id: string) {
     try {
@@ -392,6 +407,21 @@ export default function SessionDetailScreen() {
             </svg>
             Add to Google Calendar
           </a>
+        )}
+
+        {/* Reopen — move back to in-progress and continue editing live */}
+        {meta.completed_at && (
+          <button
+            onClick={handleReopen}
+            disabled={reopening}
+            className="flex items-center justify-center gap-2 w-full border border-edge rounded-2xl py-3.5 text-sm font-medium text-ink-secondary hover:text-ink hover:border-edge-strong active:opacity-70 transition-colors disabled:opacity-50"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            </svg>
+            {reopening ? 'Reopening…' : 'Reopen workout'}
+          </button>
         )}
 
       </div>

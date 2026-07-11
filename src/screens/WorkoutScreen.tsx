@@ -711,8 +711,10 @@ export default function WorkoutScreen() {
         setNotes({})
       } else {
         if (!sessionId) throw new Error('No session ID')
-        const { getInProgressSession } = await import('../lib/db')
-        session = (await getInProgressSession()) ?? { id: sessionId } as Session
+        // Load the session by id — resuming must work for exactly this
+        // session (e.g. a reopened one), not whichever is newest in-progress
+        const { getSession } = await import('../lib/db')
+        session = (await getSession(sessionId)) ?? { id: sessionId } as Session
 
         const { getActiveProgram } = await import('../lib/db')
         const program = await getActiveProgram()

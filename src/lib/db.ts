@@ -209,18 +209,41 @@ export async function createSession(workoutTemplateId: string): Promise<Session>
   return data
 }
 
+export async function getSession(sessionId: string): Promise<Session | null> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
 export async function completeSession(
   sessionId: string,
   notes?: string,
 ): Promise<Session> {
+  // Leave existing notes untouched unless new ones are passed — matters when
+  // re-completing a reopened session
+  const patch: Record<string, string> = { completed_at: new Date().toISOString() }
+  if (notes !== undefined) patch.notes = notes
   const { data, error } = await supabase
     .from('sessions')
-    .update({ completed_at: new Date().toISOString(), notes: notes ?? null })
+    .update(patch)
     .eq('id', sessionId)
     .select()
     .single()
   if (error) throw error
   return data
+}
+
+/** Moves a completed session back to in-progress so it can be edited live. */
+export async function reopenSession(sessionId: string): Promise<void> {
+  const { error } = await supabase
+    .from('sessions')
+    .update({ completed_at: null })
+    .eq('id', sessionId)
+  if (error) throw error
 }
 
 export async function discardSession(sessionId: string): Promise<void> {
