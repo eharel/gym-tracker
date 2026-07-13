@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useUnit } from '../lib/units'
 import { buildGCalUrl } from '../lib/gcal'
-import { getExerciseTemplates, getSetLogsForSession, reopenSession, updateSessionTimes } from '../lib/db'
+import { getExerciseTemplates, getSetLogsForSession, reopenSession } from '../lib/db'
+import EditTimesModal from '../components/EditTimesModal'
 import type { ExerciseTemplate, SetLog } from '../types'
 import { supabase } from '../lib/supabase'
 
@@ -52,113 +53,6 @@ function calcVolume(sets: SetLog[]): number {
   return sets
     .filter(s => s.completed && (s.set_type === 'working' || s.set_type === 'top' || s.set_type === 'backoff' || s.set_type === 'amrap'))
     .reduce((sum, s) => sum + (s.actual_weight ?? 0) * (s.actual_reps ?? 0), 0)
-}
-
-// Convert an ISO string to the "YYYY-MM-DDTHH:MM" format that datetime-local inputs expect
-function toLocalInput(iso: string): string {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-// Convert a datetime-local input value back to an ISO string (local time → UTC)
-function fromLocalInput(value: string): string {
-  return new Date(value).toISOString()
-}
-
-
-// ─── Edit Times Modal ─────────────────────────────────────────────────────────
-
-function EditTimesModal({
-  meta,
-  onSave,
-  onClose,
-}: {
-  meta: SessionMeta
-  onSave: (startedAt: string, completedAt: string | null) => void
-  onClose: () => void
-}) {
-  const [startVal, setStartVal] = useState(toLocalInput(meta.started_at))
-  const [endVal, setEndVal]     = useState(meta.completed_at ? toLocalInput(meta.completed_at) : '')
-  const [saving, setSaving]     = useState(false)
-  const [err, setErr]           = useState<string | null>(null)
-
-  async function handleSave() {
-    const startIso = fromLocalInput(startVal)
-    const endIso   = endVal ? fromLocalInput(endVal) : null
-
-    if (endIso && new Date(endIso) <= new Date(startIso)) {
-      setErr('End time must be after start time')
-      return
-    }
-
-    setSaving(true)
-    try {
-      await updateSessionTimes(meta.id, startIso, endIso)
-      onSave(startIso, endIso)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to save')
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Sheet */}
-      <div className="relative w-full max-w-md bg-surface border border-edge rounded-2xl p-5 flex flex-col gap-5 shadow-2xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-ink">Edit workout time</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-ink-disabled hover:text-ink active:opacity-70">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-ink-secondary uppercase tracking-wide">Started</span>
-            <input
-              type="datetime-local"
-              value={startVal}
-              onChange={e => setStartVal(e.target.value)}
-              className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-accent"
-            />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-ink-secondary uppercase tracking-wide">Finished</span>
-            <input
-              type="datetime-local"
-              value={endVal}
-              onChange={e => setEndVal(e.target.value)}
-              className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-accent"
-            />
-          </label>
-        </div>
-
-        {err && <p className="text-xs text-negative">{err}</p>}
-
-        <div className="flex gap-2">
-          <button
-            onClick={onClose}
-            className="flex-1 bg-elevated border border-edge text-ink-secondary font-medium rounded-xl py-3 text-sm active:opacity-70"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !startVal}
-            className="flex-1 bg-accent text-on-accent font-semibold rounded-xl py-3 text-sm active:opacity-80 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -257,7 +151,9 @@ export default function SessionDetailScreen() {
     <div className="min-h-screen">
       {editingTime && (
         <EditTimesModal
-          meta={meta}
+          sessionId={meta.id}
+          startedAt={meta.started_at}
+          completedAt={meta.completed_at}
           onSave={(startedAt, completedAt) => {
             setMeta(prev => prev ? { ...prev, started_at: startedAt, completed_at: completedAt } : prev)
             setEditingTime(false)
@@ -296,10 +192,19 @@ export default function SessionDetailScreen() {
 
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-surface/80 border border-edge rounded-xl p-3 flex flex-col items-center gap-0.5 text-center">
+          <button
+            onClick={() => setEditingTime(true)}
+            className="bg-surface/80 border border-edge rounded-xl p-3 flex flex-col items-center gap-0.5 text-center active:opacity-70"
+          >
             <span className="text-xl font-bold text-ink">{duration ?? '—'}</span>
-            <span className="text-xs text-ink-secondary">Duration</span>
-          </div>
+            <span className="text-xs text-ink-secondary flex items-center gap-1">
+              Duration
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink-disabled">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </span>
+          </button>
           <div className="bg-surface/80 border border-edge rounded-xl p-3 flex flex-col items-center gap-0.5 text-center">
             <div className="flex items-baseline gap-1">
               <span className="text-xl font-bold text-ink tabular-nums">
