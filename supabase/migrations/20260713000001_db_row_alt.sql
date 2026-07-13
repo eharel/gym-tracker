@@ -1,6 +1,7 @@
 -- ── DB Chest-Supported Row as the alternate for Lat Pulldown (Wide) ─────────
 -- Horizontal-pull stand-in for the vertical pull: 1 dumbbell warmup set
--- (percentage of working weight) + 3×8-10 matching the pulldown's scheme.
+-- (percentage of working weight) + 3×10-12 (higher than the pulldown's 8-10:
+-- +5 lb/dumbbell jumps are coarse, so extra rep room smooths progression).
 DO $$
 DECLARE
   v_lat uuid;
@@ -21,7 +22,7 @@ BEGIN
   SELECT workout_template_id, 'DB Chest-Supported Row', 999, rpe_target,
          'Weight is per dumbbell. Chest on an incline bench, row to your hips.', NULL,
          'dumbbell_percentage', 0.325, 10,
-         'straight_sets', working_set_count, working_rep_target,
+         'straight_sets', working_set_count, '10-12',
          0, 5, 5, 'none',
          true
   FROM exercise_templates WHERE id = v_lat
