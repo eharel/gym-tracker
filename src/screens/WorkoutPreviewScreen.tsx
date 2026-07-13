@@ -19,7 +19,8 @@ interface PreviewData {
   template:    WorkoutTemplate
   exercises:   ExerciseTemplate[]
   sets:        NewSetLog[]       // computed, NOT written to DB
-  lastSetLogs: SetLog[]          // benchmark or most-recent, for prev display
+  lastSetLogs: SetLog[]          // most recent session, for prev display
+  refLogs:     SetLog[]          // per-exercise fallback logs weights derive from
   comeback:    ComebackInfo | null
 }
 
@@ -144,10 +145,12 @@ function PreviewExerciseCard({
   exercise,
   sets,
   lastSetLogs,
+  refLogs,
 }: {
   exercise:    ExerciseTemplate
   sets:        NewSetLog[]
   lastSetLogs: SetLog[]
+  refLogs:     SetLog[]
 }) {
   const unit       = useUnit()
   const barWeight  = barWeightForType(exercise.bar_type)
@@ -160,6 +163,15 @@ function PreviewExerciseCard({
   )
   const prevWeight = prevSet?.actual_weight ?? null
   const plates     = barWeight !== null && workingW ? plateBreakdown(workingW, barWeight) : null
+  // Weight was auto-progressed at init: exactly one increment above the
+  // reference session it derived from (may be older than lastSetLogs)
+  const refSet = refLogs.find(l =>
+    l.exercise_template_id === exercise.id &&
+    (l.set_type === 'top' || l.set_type === 'working') && l.completed,
+  )
+  const refWeight = refSet?.actual_weight ?? refSet?.target_weight ?? null
+  const progressed = workingW !== null && refWeight !== null &&
+    workingW === refWeight + exercise.weight_increment
 
   return (
     <div className="bg-surface/80 border border-edge rounded-2xl overflow-hidden">
@@ -173,6 +185,15 @@ function PreviewExerciseCard({
             )}
             {prevWeight !== null && (
               <span className="text-xs text-ink-disabled">prev {prevWeight} {unit.label}</span>
+            )}
+            {progressed && (
+              <span className="text-xs font-semibold text-positive bg-positive/10 border border-positive/25 rounded px-1.5 py-0.5 flex items-center gap-1">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                  <polyline points="17 6 23 6 23 12" />
+                </svg>
+                +{exercise.weight_increment} {unit.label} · earned last time
+              </span>
             )}
             {plates && (
               <span className="text-xs text-ink-disabled font-mono">{plates}</span>
@@ -251,7 +272,7 @@ export default function WorkoutPreviewScreen() {
       // Compute what the session would look like — no DB write
       const sets = initializeSession(exercises, effectiveLogs, comeback?.factor)
 
-      setData({ template, exercises, sets, lastSetLogs, comeback })
+      setData({ template, exercises, sets, lastSetLogs, refLogs: effectiveLogs, comeback })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load preview')
     }
@@ -277,7 +298,7 @@ export default function WorkoutPreviewScreen() {
     </div>
   )
 
-  const { template, exercises, sets, lastSetLogs, comeback } = data
+  const { template, exercises, sets, lastSetLogs, refLogs, comeback } = data
 
   // Group sets by exercise in exercise order
   const exerciseGroups = exercises.map(ex => ({
@@ -358,6 +379,7 @@ export default function WorkoutPreviewScreen() {
                 exercise={group.exercise}
                 sets={group.sets}
                 lastSetLogs={lastSetLogs}
+                refLogs={refLogs}
               />
             )
           }
@@ -376,6 +398,7 @@ export default function WorkoutPreviewScreen() {
                     exercise={item.exercise}
                     sets={item.sets}
                     lastSetLogs={lastSetLogs}
+                    refLogs={refLogs}
                   />
                 ))}
               </div>

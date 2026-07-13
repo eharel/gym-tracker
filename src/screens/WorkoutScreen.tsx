@@ -28,6 +28,7 @@ interface WorkoutData {
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
   lastSetLogs: SetLog[]           // most recent completed session (display comparison)
+  refLogs: SetLog[]               // per-exercise fallback logs weights derived from
   stalenessMap: Record<string, number>
   comeback: ComebackInfo | null
   // Maps primary exercise ID → its alternate ExerciseTemplate (preloaded)
@@ -358,6 +359,7 @@ function ExerciseCard({
   exercise,
   sets,
   prevSets,
+  refSets,
   note,
   staleness,
   skipped,
@@ -374,6 +376,8 @@ function ExerciseCard({
   exercise: ExerciseTemplate
   sets: SetLog[]
   prevSets: SetLog[]
+  /** Logs from the session the weights were derived from (may be older than prevSets). */
+  refSets: SetLog[]
   note: NoteEntry
   staleness: number
   skipped: boolean
@@ -400,6 +404,17 @@ function ExerciseCard({
   // Current working weight for the collapsed summary line
   const topSet = sets.find(s => s.set_type === 'top') ?? sets.find(s => s.set_type === 'working')
   const workingWeight = topSet?.actual_weight ?? topSet?.target_weight ?? null
+
+  // Auto-progression happened at init when the pre-filled target sits exactly
+  // one increment above the reference session's weight (the session weights
+  // were derived from — not necessarily the newest) and wasn't overridden —
+  // announce it so the jump doesn't look like a mystery edit
+  const refTopSet = refSets.find(s => s.set_type === 'top' && s.completed)
+    ?? refSets.find(s => s.set_type === 'working' && s.completed)
+  const refTopWeight = refTopSet?.actual_weight ?? refTopSet?.target_weight ?? null
+  const progressed =
+    topSet != null && !topSet.is_weight_override &&
+    refTopWeight !== null && topSet.target_weight === refTopWeight + exercise.weight_increment
 
   return (
     <div className={`bg-surface/80 border rounded-2xl overflow-hidden transition-opacity ${
@@ -462,6 +477,15 @@ function ExerciseCard({
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               {exercise.rpe_target && (
                 <span className="text-xs text-ink-secondary">RPE {exercise.rpe_target}</span>
+              )}
+              {progressed && (
+                <span className="text-xs font-semibold text-positive bg-positive/10 border border-positive/25 rounded px-1.5 py-0.5 flex items-center gap-1">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                    <polyline points="17 6 23 6 23 12" />
+                  </svg>
+                  +{exercise.weight_increment} {unit.label} · earned last time
+                </span>
               )}
               {exercise.notes && (
                 <span className="text-xs text-ink-disabled leading-snug">{exercise.notes}</span>
@@ -712,7 +736,7 @@ export default function WorkoutScreen() {
           buildStalenessMap(exercises2),
           loadAltExercises(exercises2),
         ])
-        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: prevLogs, stalenessMap, comeback, altExercises })
+        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: prevLogs, refLogs: effectiveLogs, stalenessMap, comeback, altExercises })
         setNotes({})
       } else {
         if (!sessionId) throw new Error('No session ID')
@@ -733,10 +757,19 @@ export default function WorkoutScreen() {
         const recentSessions = await getRecentCompletedSessionsForTemplate(template.id, 10)
         const comeback = detectComeback(recentSessions)
 
-        // Resume path only needs logs for display comparison — always the
-        // most recent completed session (weights were already initialized).
-        const firstRecent = recentSessions.find(s => s.id !== sessionId)
-        const lastLogs = firstRecent ? await getSetLogsForSession(firstRecent.id) : []
+        // Weights were already initialized, but the progression chip needs the
+        // same per-exercise fallback logs init used; display comparison stays
+        // on the most recent completed session (excluding this one).
+        const priorSessions = recentSessions.filter(s => s.id !== sessionId)
+        const refSessionIds = orderReferenceSessionIds(priorSessions, comeback)
+        const allRefLogs = await getSetLogsForSessions(refSessionIds)
+        const refLogs = buildEffectiveLastLogs(
+          exercises,
+          refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id)),
+        )
+        const lastLogs = priorSessions[0]
+          ? allRefLogs.filter(l => l.session_id === priorSessions[0].id)
+          : []
 
         const [existingNotes, stalenessMap, altExercises] = await Promise.all([
           getExerciseNotes(sessionId),
@@ -748,7 +781,7 @@ export default function WorkoutScreen() {
           notesMap[n.exercise_template_id] = { id: n.id, text: n.note }
         })
 
-        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, stalenessMap, comeback, altExercises })
+        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, refLogs, stalenessMap, comeback, altExercises })
         setNotes(notesMap)
       }
     } catch (e) {
@@ -990,6 +1023,8 @@ export default function WorkoutScreen() {
     const prevExerciseSets = data!.lastSetLogs
       .filter(l => l.exercise_template_id === activeExercise.id)
       .sort((a, b) => a.set_index - b.set_index)
+    const refExerciseSets = (data!.refLogs ?? [])
+      .filter(l => l.exercise_template_id === activeExercise.id)
 
     // The label shown on the swap button is always the OTHER option
     const altName = isSwapped ? primaryExercise.name : (altExercise?.name ?? null)
@@ -1000,6 +1035,7 @@ export default function WorkoutScreen() {
         exercise={activeExercise}
         sets={exerciseSets}
         prevSets={prevExerciseSets}
+        refSets={refExerciseSets}
         note={notes[activeExercise.id] ?? { text: '' }}
         staleness={data!.stalenessMap[activeExercise.id] ?? 0}
         skipped={skipped.has(primaryExercise.id)}
