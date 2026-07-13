@@ -5,10 +5,10 @@ import { barWeightForType } from '../lib/calculations'
 import {
   getExerciseTemplates,
   getRecentCompletedSessionsForTemplate,
-  getSetLogsForSession,
+  getSetLogsForSessions,
   getWorkoutTemplates,
 } from '../lib/db'
-import { detectComeback, initializeSession } from '../lib/calculations'
+import { buildEffectiveLastLogs, detectComeback, initializeSession, orderReferenceSessionIds } from '../lib/calculations'
 import type { ComebackInfo } from '../lib/calculations'
 import type { ExerciseTemplate, NewSetLog, SetLog, WorkoutTemplate } from '../types'
 import { getActiveProgram } from '../lib/db'
@@ -238,18 +238,18 @@ export default function WorkoutPreviewScreen() {
       const recentSessions = await getRecentCompletedSessionsForTemplate(id, 10)
       const comeback        = detectComeback(recentSessions)
 
-      // Display ("prev") always reflects the most recent completed session;
-      // weight calculation uses the benchmark (pre-gap peak) during a comeback.
+      // Weight calculation walks recent sessions per exercise (benchmark
+      // first during a comeback); "prev" display uses the newest session only.
+      const refSessionIds = orderReferenceSessionIds(recentSessions, comeback)
+      const allRefLogs = await getSetLogsForSessions(refSessionIds)
+      const logsBySession = refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id))
+      const effectiveLogs = buildEffectiveLastLogs(exercises, logsBySession)
       const lastSetLogs = recentSessions[0]
-        ? await getSetLogsForSession(recentSessions[0].id)
+        ? allRefLogs.filter(l => l.session_id === recentSessions[0].id)
         : []
-      let benchmarkLogs = lastSetLogs
-      if (comeback && comeback.benchmarkSessionId !== recentSessions[0]?.id) {
-        benchmarkLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
-      }
 
       // Compute what the session would look like — no DB write
-      const sets = initializeSession(exercises, benchmarkLogs, comeback?.factor)
+      const sets = initializeSession(exercises, effectiveLogs, comeback?.factor)
 
       setData({ template, exercises, sets, lastSetLogs, comeback })
     } catch (e) {

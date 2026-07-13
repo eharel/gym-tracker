@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildEffectiveLastLogs,
   calcBackoffWeight,
   calcDumbbellWarmup,
   calcStaleness,
@@ -8,6 +9,7 @@ import {
   getNextWorkoutTemplate,
   hasEarnedProgression,
   initializeSession,
+  orderReferenceSessionIds,
   parseRepRangeMax,
 } from '../calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../../types'
@@ -490,5 +492,97 @@ describe('initializeSession', () => {
       expect(sets[0].exercise_template_id).toBe('b')
       expect(sets[1].exercise_template_id).toBe('a')
     })
+  })
+})
+
+// ─── buildEffectiveLastLogs ───────────────────────────────────────────────────
+
+describe('buildEffectiveLastLogs', () => {
+  const ex = makeEx({ id: 'ohp', working_set_type: 'top_set', working_rep_target: '5-8' })
+
+  it('uses the newest session when the exercise was performed there', () => {
+    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 95, completed: true })]
+    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 90, completed: true })]
+    const logs = buildEffectiveLastLogs([ex], [newest, older])
+    expect(logs).toHaveLength(1)
+    expect(logs[0].actual_weight).toBe(95)
+  })
+
+  it('falls back to an older session when the exercise was skipped in the newest', () => {
+    // Skipped: logs exist but nothing completed
+    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, completed: false })]
+    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 90, completed: true })]
+    const logs = buildEffectiveLastLogs([ex], [newest, older])
+    expect(logs).toHaveLength(1)
+    expect(logs[0].actual_weight).toBe(90)
+  })
+
+  it('falls back per exercise independently', () => {
+    const squat = makeEx({ id: 'squat' })
+    const newest = [
+      makeSetLog({ exercise_template_id: 'squat', set_type: 'top', actual_weight: 285, completed: true }),
+      makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, completed: false }),
+    ]
+    const older = [
+      makeSetLog({ exercise_template_id: 'squat', set_type: 'top', actual_weight: 280, completed: true }),
+      makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 90, completed: true }),
+    ]
+    const logs = buildEffectiveLastLogs([squat, ex], [newest, older])
+    expect(logs.find(l => l.exercise_template_id === 'squat')?.actual_weight).toBe(285)
+    expect(logs.find(l => l.exercise_template_id === 'ohp')?.actual_weight).toBe(90)
+  })
+
+  it('keeps the newest logs when the exercise was never performed (rep prefill parity)', () => {
+    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, actual_reps: 6, completed: false })]
+    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, actual_reps: 5, completed: false })]
+    const logs = buildEffectiveLastLogs([ex], [newest, older])
+    expect(logs).toHaveLength(1)
+    expect(logs[0].actual_reps).toBe(6)
+  })
+
+  it('drives initializeSession to generate warmups + backoff from the fallback session', () => {
+    const ohp = makeEx({
+      id: 'ohp',
+      working_set_type: 'top_set',
+      working_rep_target: '5-8',
+      warmup_rule: 'percentage_of_top_set',
+      warmup_percentages: [0, 0.68],
+      warmup_reps: [10, 5],
+      backoff_set_count: 1,
+      backoff_percentage: 0.78,
+      backoff_rep_target: '10-12',
+    })
+    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', set_index: 2, actual_weight: null, completed: false })]
+    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', set_index: 2, actual_weight: 90, actual_reps: 6, completed: true })]
+
+    const sets = initializeSession([ohp], buildEffectiveLastLogs([ohp], [newest, older]))
+    expect(sets.map(s => s.set_type)).toEqual(['warmup', 'warmup', 'top', 'backoff'])
+    expect(sets[2].target_weight).toBe(90)
+  })
+})
+
+// ─── orderReferenceSessionIds ─────────────────────────────────────────────────
+
+describe('orderReferenceSessionIds', () => {
+  const sessions = ['s1', 's2', 's3', 's4', 's5', 's6'].map(id => makeSession({ id }))
+
+  it('caps at the limit, newest-first', () => {
+    expect(orderReferenceSessionIds(sessions, null, 5)).toEqual(['s1', 's2', 's3', 's4', 's5'])
+  })
+
+  it('puts the benchmark session first during a comeback', () => {
+    const comeback = {
+      benchmarkSessionId: 's4', gapDays: 30, comebackSessionsDone: 1,
+      comebackSessionsTotal: 3, factor: 0.8, sessionsRemaining: 2,
+    }
+    expect(orderReferenceSessionIds(sessions, comeback, 5)).toEqual(['s4', 's1', 's2', 's3', 's5'])
+  })
+
+  it('includes the benchmark even when outside the cap', () => {
+    const comeback = {
+      benchmarkSessionId: 's6', gapDays: 30, comebackSessionsDone: 1,
+      comebackSessionsTotal: 3, factor: 0.8, sessionsRemaining: 2,
+    }
+    expect(orderReferenceSessionIds(sessions, comeback, 5)[0]).toBe('s6')
   })
 })

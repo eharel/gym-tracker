@@ -209,6 +209,17 @@ export async function createSession(workoutTemplateId: string): Promise<Session>
   return data
 }
 
+/** Set logs for several sessions in one query (order not guaranteed). */
+export async function getSetLogsForSessions(sessionIds: string[]): Promise<SetLog[]> {
+  if (sessionIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('set_logs')
+    .select('*')
+    .in('session_id', sessionIds)
+  if (error) throw error
+  return data ?? []
+}
+
 export async function getSession(sessionId: string): Promise<Session | null> {
   const { data, error } = await supabase
     .from('sessions')

@@ -210,6 +210,55 @@ export function getNextWorkoutTemplate(
 // ─── Session initialization ─────────────────────────────────────────────────
 
 /**
+ * Which sessions to consult (in order) when initializing a new session.
+ * Newest-first, capped; during a comeback the benchmark session leads so
+ * scaled weights derive from the pre-gap peak.
+ */
+export function orderReferenceSessionIds(
+  sessions: Session[],
+  comeback: ComebackInfo | null,
+  limit = 5,
+): string[] {
+  const ids = sessions.slice(0, limit).map(s => s.id)
+  if (comeback) {
+    const rest = ids.filter(id => id !== comeback.benchmarkSessionId)
+    return [comeback.benchmarkSessionId, ...rest]
+  }
+  return ids
+}
+
+/**
+ * Builds the reference logs for initializeSession, falling back per exercise:
+ * an exercise skipped in the most recent session still gets its weights from
+ * the last session where it was actually performed.
+ *
+ * @param sessionLogs  One SetLog[] per session, in preference order
+ *                     (normally newest-first; benchmark-first during comeback).
+ */
+export function buildEffectiveLastLogs(
+  exerciseTemplates: ExerciseTemplate[],
+  sessionLogs: SetLog[][],
+): SetLog[] {
+  const result: SetLog[] = []
+  for (const ex of exerciseTemplates) {
+    const perSession = sessionLogs.map(logs =>
+      logs.filter(l => l.exercise_template_id === ex.id),
+    )
+    const performed = perSession.find(logs =>
+      logs.some(
+        l =>
+          (l.set_type === 'top' || l.set_type === 'working' || l.set_type === 'amrap') &&
+          l.completed,
+      ),
+    )
+    // No session ever performed it → keep the newest session's logs (if any)
+    // so behavior matches the old single-session semantics.
+    result.push(...(performed ?? perSession.find(logs => logs.length > 0) ?? []))
+  }
+  return result
+}
+
+/**
  * Returns the suggested starting weight for the next session of a given exercise.
  *
  * Normal mode  – checks whether progression was earned and bumps the weight.

@@ -10,11 +10,12 @@ import {
   getRecentCompletedSessionsForTemplate,
   getSetLogsForExercise,
   getSetLogsForSession,
+  getSetLogsForSessions,
   getWorkoutTemplates,
   saveExerciseNote,
   updateSetLog,
 } from '../lib/db'
-import { barWeightForType, calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, detectComeback, initializeSession } from '../lib/calculations'
+import { barWeightForType, buildEffectiveLastLogs, calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, detectComeback, initializeSession, orderReferenceSessionIds } from '../lib/calculations'
 import type { ComebackInfo } from '../lib/calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
 import RestTimer from '../components/RestTimer'
@@ -687,17 +688,21 @@ export default function WorkoutScreen() {
         const recentSessions = await getRecentCompletedSessionsForTemplate(templateId, 10)
         const comeback = detectComeback(recentSessions)
 
-        // Display comparison ("prev" / delta badges) always uses the most
-        // recent completed session; weight calculation uses the benchmark
-        // session (pre-gap peak) during a comeback.
-        const prevLogs = recentSessions[0] ? await getSetLogsForSession(recentSessions[0].id) : []
-        let benchmarkLogs = prevLogs
-        if (comeback && comeback.benchmarkSessionId !== recentSessions[0]?.id) {
-          benchmarkLogs = await getSetLogsForSession(comeback.benchmarkSessionId)
-        }
+        // Weight calculation walks recent sessions per exercise, so a lift
+        // skipped last time still pre-fills from the last time it was done.
+        // During a comeback the benchmark (pre-gap peak) session goes first.
+        // Display comparison ("prev" / delta badges) stays on the most
+        // recent completed session only.
+        const refSessionIds = orderReferenceSessionIds(recentSessions, comeback)
+        const allRefLogs = await getSetLogsForSessions(refSessionIds)
+        const logsBySession = refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id))
+        const effectiveLogs = buildEffectiveLastLogs(exercises, logsBySession)
+        const prevLogs = recentSessions[0]
+          ? allRefLogs.filter(l => l.session_id === recentSessions[0].id)
+          : []
 
         session = await createSession(templateId)
-        const newLogs = initializeSession(exercises, benchmarkLogs, comeback?.factor)
+        const newLogs = initializeSession(exercises, effectiveLogs, comeback?.factor)
         setLogs = await createSetLogs(session.id, newLogs)
 
         navigate(`/workout/${session.id}`, { replace: true })
