@@ -357,9 +357,9 @@ export default function SummaryScreen() {
           })}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 w-full border border-edge rounded-2xl py-3.5 text-sm font-medium text-ink-secondary hover:text-ink hover:border-edge-strong active:opacity-70 transition-colors"
+          className="self-center flex items-center justify-center gap-1.5 border border-edge rounded-xl px-4 py-2.5 text-xs font-medium text-ink-secondary hover:text-ink hover:border-edge-strong active:opacity-70 transition-colors"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
             <line x1="16" y1="2" x2="16" y2="6" />
             <line x1="8" y1="2" x2="8" y2="6" />

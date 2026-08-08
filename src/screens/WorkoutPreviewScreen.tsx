@@ -77,20 +77,24 @@ function ComebackBadge({ info }: { info: ComebackInfo }) {
   )
 }
 
+// Disclosure row, deliberately NOT button-shaped: chevron-led flat text so it
+// reads as "content folded here" rather than an action
 function CollapsibleBlock({ title, text }: { title: string; text: string }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="bg-surface/60 border border-edge rounded-2xl overflow-hidden">
-      <button onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left">
-        <span className="text-sm font-semibold text-ink-secondary">{title}</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          className={`text-ink-disabled transition-transform ${open ? 'rotate-180' : ''}`}>
-          <polyline points="6 9 12 15 18 9" />
+    <div className="px-1">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 py-1 text-left active:opacity-70"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`text-ink-disabled transition-transform ${open ? 'rotate-90' : ''}`}>
+          <polyline points="9 18 15 12 9 6" />
         </svg>
+        <span className="text-xs font-semibold uppercase tracking-widest text-ink-disabled">{title}</span>
       </button>
-      {open && <div className="px-4 pb-4"><p className="text-sm text-ink-secondary leading-relaxed">{text}</p></div>}
+      {open && <p className="text-sm text-ink-secondary leading-relaxed pt-1 pb-2 pl-5">{text}</p>}
     </div>
   )
 }
