@@ -226,11 +226,19 @@ function SetRow({
     </span>
   ) : null
 
+  // Without a previous log to diff against, keep the target range visible —
+  // an empty sub-label leaves no rep goal to aim for (bit alternates hardest)
+  const targetRepsSpan = log.target_reps
+    ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span>
+    : null
+  const repsDelta = prevLog?.actual_reps != null
+    ? <DeltaBadge current={log.actual_reps} previous={prevLog.actual_reps} />
+    : targetRepsSpan
   const repsSubLabel = completed
-    ? (!isWarmup ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} /> : null)
+    ? (!isWarmup ? repsDelta : null)
     : (isPrefilled || log.actual_reps === null)
-      ? (log.target_reps ? <span className="text-xs text-ink-disabled tabular-nums">{log.target_reps}</span> : null)
-      : (!isWarmup ? <DeltaBadge current={log.actual_reps} previous={prevLog?.actual_reps ?? null} /> : null)
+      ? targetRepsSpan
+      : (!isWarmup ? repsDelta : null)
 
   const hasSubLabels = weightSubLabel !== null || repsSubLabel !== null
 
@@ -705,8 +713,11 @@ export default function WorkoutScreen() {
         template = templates.find(t => t.id === templateId) ?? templates[0]
 
         // Alternate-only exercises never render directly (and get no set
-        // logs at init) — they enter a session via the swap button only
-        const exercises = (await getExerciseTemplates(templateId)).filter(e => !e.is_alternate_only)
+        // logs at init) — they enter a session via the swap button only.
+        // They DO participate in reference-log building so swaps get
+        // history, deltas, and progression like any other exercise.
+        const allTemplateExercises = await getExerciseTemplates(templateId)
+        const exercises = allTemplateExercises.filter(e => !e.is_alternate_only)
 
         // ── Comeback detection ─────────────────────────────────────────────
         const recentSessions = await getRecentCompletedSessionsForTemplate(templateId, 10)
@@ -720,7 +731,7 @@ export default function WorkoutScreen() {
         const refSessionIds = orderReferenceSessionIds(recentSessions, comeback)
         const allRefLogs = await getSetLogsForSessions(refSessionIds)
         const logsBySession = refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id))
-        const effectiveLogs = buildEffectiveLastLogs(exercises, logsBySession)
+        const effectiveLogs = buildEffectiveLastLogs(allTemplateExercises, logsBySession)
         const prevLogs = recentSessions[0]
           ? allRefLogs.filter(l => l.session_id === recentSessions[0].id)
           : []
@@ -750,7 +761,8 @@ export default function WorkoutScreen() {
         const templates = await getWorkoutTemplates(program?.id ?? '')
         template = templates.find(t => t.id === session.workout_template_id) ?? templates[0]
 
-        const exercises = (await getExerciseTemplates(template.id)).filter(e => !e.is_alternate_only)
+        const allTemplateExercises = await getExerciseTemplates(template.id)
+        const exercises = allTemplateExercises.filter(e => !e.is_alternate_only)
         setLogs = await getSetLogsForSession(sessionId)
 
         // ── Comeback detection (resume path) ──────────────────────────────
@@ -764,7 +776,7 @@ export default function WorkoutScreen() {
         const refSessionIds = orderReferenceSessionIds(priorSessions, comeback)
         const allRefLogs = await getSetLogsForSessions(refSessionIds)
         const refLogs = buildEffectiveLastLogs(
-          exercises,
+          allTemplateExercises,
           refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id)),
         )
         const lastLogs = priorSessions[0]
@@ -967,7 +979,10 @@ export default function WorkoutScreen() {
       // Only create set logs for the alternate once per session
       const altLogsExist = data.setLogs.some(l => l.exercise_template_id === altExercise.id)
       if (!altLogsExist) {
-        const altPrevLogs = await getSetLogsForExercise(altExercise.id, 20)
+        // refLogs already hold the alternate's last-performed session
+        // (properly grouped), so init gets correct weights AND progression —
+        // a raw multi-session log pile broke the all-sets-hit-target check
+        const altPrevLogs = (data.refLogs ?? []).filter(l => l.exercise_template_id === altExercise.id)
         const newLogs = initializeSession([altExercise], altPrevLogs, data.comeback?.factor)
         const created = await createSetLogs(data.session.id, newLogs)
         setData(prev => prev ? { ...prev, setLogs: [...prev.setLogs, ...created] } : prev)
@@ -1032,11 +1047,14 @@ export default function WorkoutScreen() {
     const exerciseSets = setLogs
       .filter(l => l.exercise_template_id === activeExercise.id)
       .sort((a, b) => a.set_index - b.set_index)
-    const prevExerciseSets = data!.lastSetLogs
+    const lastSessionSets = data!.lastSetLogs
       .filter(l => l.exercise_template_id === activeExercise.id)
       .sort((a, b) => a.set_index - b.set_index)
     const refExerciseSets = (data!.refLogs ?? [])
       .filter(l => l.exercise_template_id === activeExercise.id)
+    // Alternates usually weren't in the newest session — compare against the
+    // last session they were actually performed in instead
+    const prevExerciseSets = lastSessionSets.length > 0 ? lastSessionSets : refExerciseSets
 
     // The label shown on the swap button is always the OTHER option
     const altName = isSwapped ? primaryExercise.name : (altExercise?.name ?? null)
