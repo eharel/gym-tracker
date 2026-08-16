@@ -48,7 +48,7 @@ BEGIN
     (v_b, 'Incline Crunch', 5, '8',
      'Back-extension bench used in reverse — full stretch at the bottom. Log the plate held on the chest (0 if bodyweight).',
      'bss_abs',
-     'none', 'straight_sets', 3, '10-15',
+     'none', 'straight_sets', 3, '12-15',
      0, 5, 5, 'none', false);
 END $$;
 
