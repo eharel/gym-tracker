@@ -4,6 +4,7 @@ import { useUnit } from '../lib/units'
 import {
   createSession,
   createSetLogs,
+  deleteSetLog,
   getExerciseNotes,
   getExerciseTemplate,
   getExerciseTemplates,
@@ -368,6 +369,9 @@ function ExerciseCard({
   sets,
   prevSets,
   refSets,
+  onAddSet,
+  onRemoveSet,
+  addingSet,
   note,
   staleness,
   skipped,
@@ -386,6 +390,9 @@ function ExerciseCard({
   prevSets: SetLog[]
   /** Logs from the session the weights were derived from (may be older than prevSets). */
   refSets: SetLog[]
+  onAddSet: (exerciseId: string) => void
+  onRemoveSet: (logId: string) => void
+  addingSet: boolean
   note: NoteEntry
   staleness: number
   skipped: boolean
@@ -408,6 +415,14 @@ function ExerciseCard({
   const collapsed = allDone && !manuallyExpanded
 
   const barWeight = barWeightForType(exercise.bar_type)
+
+  // Sets logged beyond what the template prescribes can be removed again
+  const prescribedSets = exercise.working_set_type === 'top_set'
+    ? 1 + exercise.backoff_set_count
+    : exercise.working_set_count
+  const lastWorkingSet = workingSets[workingSets.length - 1]
+  const canRemoveExtra =
+    workingSets.length > prescribedSets && lastWorkingSet != null && !lastWorkingSet.completed
 
   // Current working weight for the collapsed summary line
   const topSet = sets.find(s => s.set_type === 'top') ?? sets.find(s => s.set_type === 'working')
@@ -561,6 +576,32 @@ function ExerciseCard({
             ))}
           </div>
 
+          {/* Extra-set controls — the template prescribes a count, but an
+              unplanned set should still be loggable without editing it */}
+          <div className="px-3 pb-2 flex items-center gap-3">
+            <button
+              onClick={() => onAddSet(exercise.id)}
+              disabled={addingSet}
+              className="text-xs font-medium text-ink-secondary active:opacity-60 disabled:opacity-40 flex items-center gap-1"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              {addingSet ? 'Adding…' : 'Add set'}
+            </button>
+            {canRemoveExtra && (
+              <button
+                onClick={() => onRemoveSet(lastWorkingSet!.id)}
+                className="text-xs font-medium text-ink-disabled active:opacity-60 flex items-center gap-1"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Remove extra
+              </button>
+            )}
+          </div>
+
           {/* Per-exercise notes */}
           <div className="px-3 pb-3">
             <textarea
@@ -668,6 +709,7 @@ export default function WorkoutScreen() {
   // primary exercise ID → currently showing alternate
   const [swappedToAlt, setSwappedToAlt] = useState<Set<string>>(new Set())
   const [swapping, setSwapping] = useState<string | null>(null)
+  const [addingSet, setAddingSet] = useState<string | null>(null)
 
   const pendingUpdates = useRef<Map<string, Partial<SetLog>>>(new Map())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -963,6 +1005,41 @@ export default function WorkoutScreen() {
     })
   }
 
+  // Ad-hoc extra set — clones the last working set's type/target so an
+  // unplanned set can be logged without editing the template
+  async function handleAddSet(exerciseId: string) {
+    if (!data || addingSet) return
+    const existing = data.setLogs
+      .filter(l => l.exercise_template_id === exerciseId)
+      .sort((a, b) => a.set_index - b.set_index)
+    const lastWorking = [...existing].reverse().find(l => l.set_type !== 'warmup')
+    if (!lastWorking) return
+
+    setAddingSet(exerciseId)
+    try {
+      const [created] = await createSetLogs(data.session.id, [{
+        exercise_template_id: exerciseId,
+        set_index: (existing[existing.length - 1]?.set_index ?? -1) + 1,
+        set_type: lastWorking.set_type,
+        target_weight: lastWorking.actual_weight ?? lastWorking.target_weight,
+        actual_weight: null,
+        target_reps: lastWorking.target_reps,
+        actual_reps: null,
+        is_weight_override: false,
+        completed: false,
+      }])
+      setData(prev => prev ? { ...prev, setLogs: [...prev.setLogs, created] } : prev)
+    } finally {
+      setAddingSet(null)
+    }
+  }
+
+  async function handleRemoveSet(logId: string) {
+    if (!data) return
+    setData(prev => prev ? { ...prev, setLogs: prev.setLogs.filter(l => l.id !== logId) } : prev)
+    await deleteSetLog(logId)
+  }
+
   async function handleSwap(primaryExerciseId: string) {
     if (!data || swapping) return
 
@@ -1066,6 +1143,9 @@ export default function WorkoutScreen() {
         sets={exerciseSets}
         prevSets={prevExerciseSets}
         refSets={refExerciseSets}
+        onAddSet={handleAddSet}
+        onRemoveSet={handleRemoveSet}
+        addingSet={addingSet === activeExercise.id}
         note={notes[activeExercise.id] ?? { text: '' }}
         staleness={data!.stalenessMap[activeExercise.id] ?? 0}
         skipped={skipped.has(primaryExercise.id)}

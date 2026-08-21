@@ -349,6 +349,12 @@ export async function createSetLogs(
   return data
 }
 
+/** Removes a single set log — used to undo an ad-hoc extra set. */
+export async function deleteSetLog(id: string): Promise<void> {
+  const { error } = await supabase.from('set_logs').delete().eq('id', id)
+  if (error) throw error
+}
+
 export async function updateSetLog(
   id: string,
   updates: Partial<Pick<SetLog, 'actual_weight' | 'actual_reps' | 'is_weight_override' | 'completed'>>,
