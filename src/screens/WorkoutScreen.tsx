@@ -1015,15 +1015,31 @@ export default function WorkoutScreen() {
     const lastWorking = [...existing].reverse().find(l => l.set_type !== 'warmup')
     if (!lastWorking) return
 
+    const ex = data.exercises.find(e => e.id === exerciseId)
+      ?? [...data.altExercises.values()].find(e => e.id === exerciseId)
+
+    let setType = lastWorking.set_type
+    let targetWeight = lastWorking.actual_weight ?? lastWorking.target_weight
+    let targetReps = lastWorking.target_reps
+
+    // A top-set exercise that defines a backoff percentage but prescribes no
+    // backoff sets gets an *optional* one: adding after the top set computes
+    // it the normal way instead of cloning the top set's weight
+    if (ex && lastWorking.set_type === 'top' && ex.backoff_percentage && targetWeight !== null) {
+      setType = 'backoff'
+      targetWeight = calcBackoffWeight(targetWeight, ex.backoff_percentage, ex.rounding_increment)
+      targetReps = ex.backoff_rep_target ?? targetReps
+    }
+
     setAddingSet(exerciseId)
     try {
       const [created] = await createSetLogs(data.session.id, [{
         exercise_template_id: exerciseId,
         set_index: (existing[existing.length - 1]?.set_index ?? -1) + 1,
-        set_type: lastWorking.set_type,
-        target_weight: lastWorking.actual_weight ?? lastWorking.target_weight,
+        set_type: setType,
+        target_weight: targetWeight,
         actual_weight: null,
-        target_reps: lastWorking.target_reps,
+        target_reps: targetReps,
         actual_reps: null,
         is_weight_override: false,
         completed: false,

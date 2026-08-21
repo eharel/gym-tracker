@@ -286,8 +286,10 @@ export default function ExerciseEditorScreen() {
       working_rep_target: workingRepTarget.trim() || null,
 
       backoff_set_count: Number(backoffSetCount) || 0,
-      backoff_percentage: Number(backoffSetCount) > 0 ? (Number(backoffPercentage) || null) : null,
-      backoff_rep_target: Number(backoffSetCount) > 0 ? (backoffRepTarget.trim() || null) : null,
+      // Kept even when the count is 0 — that combination means "no prescribed
+      // backoff, but Add set can still compute one" (see handleAddSet)
+      backoff_percentage: Number(backoffPercentage) || null,
+      backoff_rep_target: backoffRepTarget.trim() || null,
 
       weight_increment: Number(weightIncrement) || 5,
       rounding_increment: Number(roundingIncrement) || 5,
