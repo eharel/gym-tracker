@@ -150,12 +150,35 @@ describe('calcWarmupWeight', () => {
   })
 })
 
+// ─── calcWarmupWeight: 0% uses the exercise's own bar ───────────────────────
+
+describe('calcWarmupWeight bar weight', () => {
+  it('defaults the empty-bar case to a 45 lb barbell', () => {
+    expect(calcWarmupWeight(200, 0)).toBe(45)
+  })
+  it('uses the given bar weight for non-standard bars', () => {
+    expect(calcWarmupWeight(200, 0, 5, 25)).toBe(25)  // EZ bar
+    expect(calcWarmupWeight(200, 0, 5, 65)).toBe(65)  // safety squat bar
+  })
+  it('ignores bar weight for non-zero percentages', () => {
+    expect(calcWarmupWeight(200, 0.5, 5, 25)).toBe(100)
+  })
+})
+
 // ─── calcDumbbellWarmup ──────────────────────────────────────────────────────
 
 describe('calcDumbbellWarmup', () => {
-  it('applies the default percentage (32.5%) and rounds to 5', () => {
-    // 100 * 0.325 = 32.5 → 35
-    expect(calcDumbbellWarmup(100)).toBe(35)
+  it('applies the default percentage (60%) and rounds to 5', () => {
+    // 100 * 0.6 = 60
+    expect(calcDumbbellWarmup(100)).toBe(60)
+  })
+
+  // Dumbbell loads are small in absolute terms, so a barbell-style low
+  // percentage produces a warmup too light to prime anything
+  it('produces a usable primer for realistic dumbbell loads', () => {
+    expect(calcDumbbellWarmup(40)).toBe(25)  // not 15
+    expect(calcDumbbellWarmup(45)).toBe(25)
+    expect(calcDumbbellWarmup(55)).toBe(35)
   })
   it('applies a custom percentage', () => {
     // 60 * 0.3 = 18 → 20

@@ -112,15 +112,23 @@ export function calcWarmupWeight(
   topSetWeight: number,
   percentage: number,
   roundingIncrement: number = 5,
+  barWeight: number = 45,
 ): number {
-  if (percentage === 0) return 45 // empty bar, always
+  // 0% means "the empty bar" — which is 25 on an EZ bar, 65 on an SSB, etc.
+  if (percentage === 0) return barWeight
   const raw = topSetWeight * percentage
   return Math.round(raw / roundingIncrement) * roundingIncrement
 }
 
+/**
+ * Single primer set for dumbbell work. The default is a much higher fraction
+ * of the working weight than a barbell warmup uses: dumbbell loads are small
+ * in absolute terms, so a barbell-style low percentage lands on a weight too
+ * light to prime anything (32.5% of a 40 lb dumbbell is 13 lb).
+ */
 export function calcDumbbellWarmup(
   workingWeight: number,
-  dbPercentage: number = 0.325,
+  dbPercentage: number = 0.6,
   roundingIncrement: number = 5,
 ): number {
   const raw = workingWeight * dbPercentage
@@ -374,6 +382,7 @@ export function initializeSession(
               workingWeight,
               ex.warmup_percentages[i],
               ex.rounding_increment,
+              barWeightForType(ex.bar_type) ?? 45,
             ),
             actual_weight: null,
             target_reps: String(ex.warmup_reps[i]),

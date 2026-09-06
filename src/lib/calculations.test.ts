@@ -133,14 +133,18 @@ describe('calcWarmupWeight', () => {
 // ─── calcDumbbellWarmup ─────────────────────────────────────────────────────
 
 describe('calcDumbbellWarmup', () => {
-  // RDL 190 lbs → 190 × 0.325 = 61.75 → rounds to 60
-  it('RDL 190 lbs → 60 lbs DB', () => {
-    expect(calcDumbbellWarmup(190)).toBe(60)
+  // RDL 190 lbs → 190 × 0.6 = 114 → rounds to 115
+  it('RDL 190 lbs → 115 lbs at the default percentage', () => {
+    expect(calcDumbbellWarmup(190)).toBe(115)
+  })
+  // Exercises that want the old lighter primer pass it explicitly
+  it('RDL 190 lbs → 60 lbs at 32.5%', () => {
+    expect(calcDumbbellWarmup(190, 0.325)).toBe(60)
   })
 
-  // Pendlay Row 155 lbs → 155 × 0.325 = 50.375 → rounds to 50
-  it('Pendlay Row 155 lbs → 50 lbs DB', () => {
-    expect(calcDumbbellWarmup(155)).toBe(50)
+  // Pendlay Row keeps the lighter 32.5%: 155 × 0.325 = 50.375 → rounds to 50
+  it('Pendlay Row 155 lbs → 50 lbs DB at 32.5%', () => {
+    expect(calcDumbbellWarmup(155, 0.325)).toBe(50)
   })
 
   it('uses custom dbPercentage', () => {

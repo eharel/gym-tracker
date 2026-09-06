@@ -898,7 +898,7 @@ export default function WorkoutScreen() {
           if (l.set_type === 'warmup' && exercise.warmup_rule === 'percentage_of_top_set' && exercise.warmup_percentages) {
             const pct = exercise.warmup_percentages[l.set_index]
             if (pct === undefined) return l
-            return { ...l, target_weight: calcWarmupWeight(weight, pct, exercise.rounding_increment) }
+            return { ...l, target_weight: calcWarmupWeight(weight, pct, exercise.rounding_increment, barWeightForType(exercise.bar_type) ?? 45) }
           }
           if (l.set_type === 'warmup' && exercise.warmup_rule === 'dumbbell_percentage') {
             return { ...l, target_weight: calcDumbbellWarmup(weight, exercise.warmup_db_percentage ?? 0.325, exercise.rounding_increment) }
