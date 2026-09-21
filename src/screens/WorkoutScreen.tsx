@@ -884,9 +884,18 @@ export default function WorkoutScreen() {
     const log = data?.setLogs.find(l => l.id === logId)
     if (!log) return
     const newCompleted = !log.completed
-    updateLog(logId, { completed: newCompleted })
+    // A set completed at the prescribed weight records that weight: an empty
+    // actual_weight left every such set invisible to progress, history, PRs
+    // and staleness. is_weight_override stays false, so "accepted the
+    // target" remains distinguishable from "typed a weight".
+    const patch: Partial<SetLog> = { completed: newCompleted }
+    if (newCompleted && log.actual_weight === null && log.target_weight !== null) {
+      patch.actual_weight = log.target_weight
+    }
+    updateLog(logId, patch)
+    // Write now, together with any weight/rep edit still waiting on the debounce
     if (flushTimer.current) clearTimeout(flushTimer.current)
-    await updateSetLog(logId, { completed: newCompleted })
+    await flushPending()
     // Kick off rest timer when any non-warmup set is marked complete
     if (newCompleted && log.set_type !== 'warmup') {
       setRestSignal(s => s + 1)
