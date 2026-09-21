@@ -215,56 +215,200 @@ export function getNextWorkoutTemplate(
   return templates.find(t => t.order_in_program === nextOrder) ?? templates[0]
 }
 
-// ─── Session initialization ─────────────────────────────────────────────────
+// ─── Weekly schedule ─────────────────────────────────────────────────────────
 
-/**
- * Which sessions to consult (in order) when initializing a new session.
- * Newest-first, capped; during a comeback the benchmark session leads so
- * scaled weights derive from the pre-gap peak.
- */
-export function orderReferenceSessionIds(
-  sessions: Session[],
-  comeback: ComebackInfo | null,
-  limit = 5,
-): string[] {
-  const ids = sessions.slice(0, limit).map(s => s.id)
-  if (comeback) {
-    const rest = ids.filter(id => id !== comeback.benchmarkSessionId)
-    return [comeback.benchmarkSessionId, ...rest]
-  }
-  return ids
+/** A program is "weekly" as soon as any of its workouts is pinned to days. */
+export function isWeeklyProgram(templates: WorkoutTemplate[]): boolean {
+  return templates.some(t => (t.scheduled_days?.length ?? 0) > 0)
+}
+
+/** Mon = 0 … Sun = 6 — the training week runs Monday through Sunday. */
+function mondayIndex(jsWeekday: number): number {
+  return (jsWeekday + 6) % 7
+}
+
+/** Monday 00:00 local time of the week containing `now`. */
+export function startOfWeek(now: Date): Date {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  d.setDate(d.getDate() - mondayIndex(d.getDay()))
+  return d
+}
+
+export type WeekSlotStatus = 'done' | 'today' | 'upcoming' | 'missed' | 'skipped'
+
+export interface WeekSlot {
+  template: WorkoutTemplate
+  /** Monday-first indices of the days this workout belongs to. */
+  days: number[]
+  status: WeekSlotStatus
 }
 
 /**
- * Builds the reference logs for initializeSession, falling back per exercise:
- * an exercise skipped in the most recent session still gets its weights from
- * the last session where it was actually performed.
+ * This week's plan: one slot per scheduled workout, in weekday order, with
+ * its status. A workout spanning several days (e.g. Fri/Sat) is done once
+ * any session of it completes this week. Unfinished optional workouts whose
+ * days have passed read as "skipped", required ones as "missed".
+ */
+export function buildWeekPlan(
+  templates: WorkoutTemplate[],
+  completedSessions: Session[],
+  now: Date = new Date(),
+): WeekSlot[] {
+  const weekStart = startOfWeek(now).getTime()
+  const today = mondayIndex(now.getDay())
+  const doneThisWeek = new Set(
+    completedSessions
+      .filter(s => s.completed_at && new Date(s.completed_at).getTime() >= weekStart)
+      .map(s => s.workout_template_id),
+  )
+
+  return templates
+    .filter(t => (t.scheduled_days?.length ?? 0) > 0)
+    .map(t => {
+      const days = t.scheduled_days!.map(mondayIndex).sort((a, b) => a - b)
+      let status: WeekSlotStatus
+      if (doneThisWeek.has(t.id)) status = 'done'
+      else if (days.includes(today)) status = 'today'
+      else if (days[days.length - 1] < today) status = t.is_optional ? 'skipped' : 'missed'
+      else status = 'upcoming'
+      return { template: t, days, status }
+    })
+    .sort((a, b) => a.days[0] - b.days[0])
+}
+
+/**
+ * The workout to feature on the home screen: today's if it isn't done, else
+ * the next required one this week, else a missed one to catch up on.
+ */
+export function pickFeaturedSlot(plan: WeekSlot[]): WeekSlot | null {
+  return plan.find(s => s.status === 'today')
+    ?? plan.find(s => s.status === 'upcoming' && !s.template.is_optional)
+    ?? plan.find(s => s.status === 'missed')
+    ?? plan.find(s => s.status === 'upcoming')
+    ?? null
+}
+
+// ─── Movement history ────────────────────────────────────────────────────────
+
+/** Identity shared by every copy of a lift across programs. */
+export function movementKey(ex: Pick<ExerciseTemplate, 'id' | 'movement_id'>): string {
+  return ex.movement_id ?? ex.id
+}
+
+/** A set log from a completed session, carrying that session's timestamps. */
+export type HistoryLog = SetLog & {
+  session_started_at: string
+  session_completed_at: string
+}
+
+export interface ExercisePlan {
+  /** Logs each exercise's weights derive from, remapped onto its own id:
+   *  its last performance, or its pre-gap benchmark during a comeback. */
+  refLogs: SetLog[]
+  /** Each exercise's last performance, remapped — the "previous" that
+   *  deltas and the post-workout comparison measure against. */
+  lastLogs: SetLog[]
+  /** Comeback state keyed by exercise id; absent = not in a comeback. */
+  comebacks: Record<string, ComebackInfo>
+}
+
+const PERFORMED_SET_TYPES = new Set<SetLog['set_type']>(['top', 'working', 'amrap'])
+
+/** The weight a session's main set was done at: the top set, else the first working set. */
+function mainSetWeight(logs: SetLog[]): number | null {
+  const main =
+    logs.find(l => l.set_type === 'top' && l.completed) ??
+    logs.find(l => (l.set_type === 'working' || l.set_type === 'amrap') && l.completed)
+  return main ? (main.actual_weight ?? main.target_weight) : null
+}
+
+/**
+ * Resolves what each exercise's session should build from, using the whole
+ * history of its movement rather than the workout it happens to sit in.
  *
- * @param sessionLogs  One SetLog[] per session, in preference order
- *                     (normally newest-first; benchmark-first during comeback).
+ * Per exercise: the last session that actually *performed* the movement
+ * (skips don't count) supplies the weights; a 14+ day gap in that
+ * movement's own history triggers a comeback ramp for that exercise alone.
+ * Logs are remapped onto the exercise's own id so initializeSession and the
+ * set rows can match them directly.
+ *
+ * @param movementOf  maps a log's exercise_template_id to its movement key
  */
-export function buildEffectiveLastLogs(
-  exerciseTemplates: ExerciseTemplate[],
-  sessionLogs: SetLog[][],
-): SetLog[] {
-  const result: SetLog[] = []
-  for (const ex of exerciseTemplates) {
-    const perSession = sessionLogs.map(logs =>
-      logs.filter(l => l.exercise_template_id === ex.id),
+export function planFromHistory(
+  exercises: ExerciseTemplate[],
+  logs: HistoryLog[],
+  movementOf: (exerciseTemplateId: string) => string,
+  now: Date = new Date(),
+): ExercisePlan {
+  const refLogs: SetLog[] = []
+  const lastLogs: SetLog[] = []
+  const comebacks: Record<string, ComebackInfo> = {}
+
+  for (const ex of exercises) {
+    const key = movementKey(ex)
+    const bySession = new Map<string, HistoryLog[]>()
+    for (const l of logs) {
+      if (movementOf(l.exercise_template_id) !== key) continue
+      const list = bySession.get(l.session_id) ?? []
+      list.push(l)
+      bySession.set(l.session_id, list)
+    }
+
+    const sessions = [...bySession.entries()]
+      .map(([id, ls]) => ({
+        id,
+        logs: ls,
+        startedAt: ls[0].session_started_at,
+        completedAt: ls[0].session_completed_at,
+        performed: ls.some(l => PERFORMED_SET_TYPES.has(l.set_type) && l.completed),
+      }))
+      .sort((a, b) => b.completedAt.localeCompare(a.completedAt))
+    const performed = sessions.filter(s => s.performed)
+
+    const remap = (ls: HistoryLog[]): SetLog[] =>
+      ls.map(l => ({ ...l, exercise_template_id: ex.id }))
+
+    // Never performed → newest logs anyway, so rep prefill still has a source
+    const last = performed[0] ?? sessions[0]
+    if (last) lastLogs.push(...remap(last.logs))
+
+    const comeback = detectComeback(
+      performed.map(s => ({
+        id: s.id,
+        profile_id: '',
+        workout_template_id: '',
+        started_at: s.startedAt,
+        completed_at: s.completedAt,
+        notes: null,
+      })),
+      now,
     )
-    const performed = perSession.find(logs =>
-      logs.some(
-        l =>
-          (l.set_type === 'top' || l.set_type === 'working' || l.set_type === 'amrap') &&
-          l.completed,
-      ),
-    )
-    // No session ever performed it → keep the newest session's logs (if any)
-    // so behavior matches the old single-session semantics.
-    result.push(...(performed ?? perSession.find(logs => logs.length > 0) ?? []))
+    // A comeback exists to protect against lost strength. Once a session
+    // since the layoff has matched the pre-gap weight, the ramp is moot —
+    // otherwise someone who returns at full strength gets held back anyway.
+    let active = comeback
+    if (comeback) {
+      const benchIdx = performed.findIndex(s => s.id === comeback.benchmarkSessionId)
+      const benchWeight = benchIdx >= 0 ? mainSetWeight(performed[benchIdx].logs) : null
+      const recovered = benchWeight !== null && performed
+        .slice(0, benchIdx)   // sessions since the gap, newest-first
+        .some(s => (mainSetWeight(s.logs) ?? -Infinity) >= benchWeight)
+      if (recovered) active = null
+    }
+
+    if (active) {
+      comebacks[ex.id] = active
+      const benchmark = performed.find(s => s.id === active.benchmarkSessionId)
+      if (benchmark) refLogs.push(...remap(benchmark.logs))
+    } else if (last) {
+      refLogs.push(...remap(last.logs))
+    }
   }
-  return result
+
+  return { refLogs, lastLogs, comebacks }
 }
+
+// ─── Session initialization ─────────────────────────────────────────────────
 
 /**
  * Returns the suggested starting weight for the next session of a given exercise.
@@ -351,19 +495,22 @@ function getPrevRepsForSet(
  * - lastSetLogs: set_logs from the reference session (most recent in normal
  *   mode; benchmark session in comeback mode). Pass [] for first-ever session.
  * - comebackFactor: when provided, skips progression and scales the benchmark
- *   weight by this multiplier (0 < factor ≤ 1).
+ *   weight by this multiplier (0 < factor ≤ 1). Either one factor for every
+ *   exercise, or a map keyed by exercise id (exercises absent from it are
+ *   not in a comeback).
  */
 export function initializeSession(
   exerciseTemplates: ExerciseTemplate[],
   lastSetLogs: SetLog[],
-  comebackFactor?: number,
+  comebackFactor?: number | Record<string, number>,
 ): NewSetLog[] {
   const result: NewSetLog[] = []
   const sorted = [...exerciseTemplates].sort((a, b) => a.position - b.position)
 
   for (const ex of sorted) {
     let setIndex = 0
-    const workingWeight = getSuggestedWeight(ex, lastSetLogs, comebackFactor)
+    const factor = typeof comebackFactor === 'number' ? comebackFactor : comebackFactor?.[ex.id]
+    const workingWeight = getSuggestedWeight(ex, lastSetLogs, factor)
 
     // Warmup sets
     if (ex.warmup_rule !== 'none' && workingWeight !== null) {

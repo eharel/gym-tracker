@@ -13,7 +13,7 @@ import { supabase } from '../lib/supabase'
 
 async function updateWorkoutTemplate(
   id: string,
-  updates: Partial<Pick<WorkoutTemplate, 'name' | 'warmup_text' | 'cooldown_text'>>,
+  updates: Partial<Pick<WorkoutTemplate, 'name' | 'warmup_text' | 'cooldown_text' | 'scheduled_days' | 'is_optional'>>,
 ): Promise<void> {
   const { error } = await supabase.from('workout_templates').update(updates).eq('id', id)
   if (error) throw error
@@ -34,6 +34,8 @@ export default function TemplateEditorScreen() {
   const [name, setName] = useState('')
   const [warmupText, setWarmupText] = useState('')
   const [cooldownText, setCooldownText] = useState('')
+  const [days, setDays] = useState<number[]>([])
+  const [isOptional, setIsOptional] = useState(false)
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -52,6 +54,8 @@ export default function TemplateEditorScreen() {
         setName(data.name)
         setWarmupText(data.warmup_text ?? '')
         setCooldownText(data.cooldown_text ?? '')
+        setDays(data.scheduled_days ?? [])
+        setIsOptional(data.is_optional ?? false)
 
         const ex = await getExerciseTemplates(templateId)
         setExercises(ex)
@@ -85,6 +89,29 @@ export default function TemplateEditorScreen() {
     scheduleSave({ name, warmup_text: warmupText || null, cooldown_text: v || null })
   }
 
+  // Schedule toggles save immediately — no text being typed to debounce
+  async function saveSchedule(nextDays: number[], nextOptional: boolean) {
+    if (!templateId) return
+    setSaving(true)
+    try {
+      await updateWorkoutTemplate(templateId, {
+        scheduled_days: nextDays.length ? nextDays : null,
+        is_optional: nextOptional,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+  function toggleDay(d: number) {
+    const next = days.includes(d) ? days.filter(x => x !== d) : [...days, d]
+    setDays(next)
+    saveSchedule(next, isOptional)
+  }
+  function toggleOptional() {
+    setIsOptional(!isOptional)
+    saveSchedule(days, !isOptional)
+  }
+
   async function handleAddExercise() {
     if (!templateId) return
     const newEx = await upsertExerciseTemplate({
@@ -98,6 +125,7 @@ export default function TemplateEditorScreen() {
       bar_type: 'none',
       alternate_exercise_id: null,
       is_alternate_only: false,
+      movement_id: null,
       warmup_rule: 'none',
       warmup_percentages: null,
       warmup_reps: null,
@@ -180,6 +208,40 @@ export default function TemplateEditorScreen() {
               onChange={e => handleNameChange(e.target.value)}
               className="bg-elevated border border-edge rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-accent transition-colors"
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-ink-disabled uppercase tracking-wide">Days</label>
+            <div className="flex gap-1.5">
+              {/* Monday-first; values are JS weekdays (Sun = 0) */}
+              {[1, 2, 3, 4, 5, 6, 0].map(d => {
+                const on = days.includes(d)
+                return (
+                  <button
+                    key={d}
+                    onClick={() => toggleDay(d)}
+                    aria-pressed={on}
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors ${
+                      on ? 'bg-accent text-on-accent border-accent' : 'bg-elevated text-ink-secondary border-edge active:opacity-70'
+                    }`}
+                  >
+                    {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][d]}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-ink-disabled">
+              {days.length
+                ? 'Shown on these days in the weekly plan on the home screen.'
+                : 'No days set — this workout runs in A/B rotation.'}
+            </p>
+            {days.length > 0 && (
+              <button onClick={toggleOptional} className="flex items-center justify-between py-1 mt-1">
+                <span className="text-sm text-ink">Optional session</span>
+                <span className={`w-10 h-6 rounded-full relative transition-colors ${isOptional ? 'bg-accent' : 'bg-elevated border border-edge'}`}>
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${isOptional ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </span>
+              </button>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-ink-disabled uppercase tracking-wide">Warmup notes</label>

@@ -106,7 +106,7 @@ export default function ProgressScreen() {
         const program = await getActiveProgram()
         if (!program) { setTrends([]); return }
         const exercises = await getProgramExercises(program.id)
-        const logs = await getProgressLogs(exercises.map(e => e.id))
+        const logs = await getProgressLogs(exercises)
 
         const byExercise = new Map<string, ProgressLog[]>()
         for (const log of logs) {

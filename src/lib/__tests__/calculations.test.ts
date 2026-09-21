@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildEffectiveLastLogs,
+  buildWeekPlan,
   calcBackoffWeight,
   calcDumbbellWarmup,
   calcStaleness,
@@ -9,8 +9,12 @@ import {
   getNextWorkoutTemplate,
   hasEarnedProgression,
   initializeSession,
-  orderReferenceSessionIds,
+  movementKey,
   parseRepRangeMax,
+  pickFeaturedSlot,
+  planFromHistory,
+  startOfWeek,
+  type HistoryLog,
 } from '../calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../../types'
 
@@ -29,6 +33,7 @@ function makeEx(overrides?: Partial<ExerciseTemplate>): ExerciseTemplate {
     bar_type: 'none',
     alternate_exercise_id: null,
     is_alternate_only: false,
+    movement_id: null,
     warmup_rule: 'none',
     warmup_percentages: null,
     warmup_reps: null,
@@ -57,6 +62,8 @@ function makeTemplate(overrides?: Partial<WorkoutTemplate>): WorkoutTemplate {
     order_in_program: 0,
     warmup_text: null,
     cooldown_text: null,
+    scheduled_days: null,
+    is_optional: false,
     created_at: '2026-01-01T00:00:00Z',
     ...overrides,
   }
@@ -518,94 +525,226 @@ describe('initializeSession', () => {
   })
 })
 
-// ─── buildEffectiveLastLogs ───────────────────────────────────────────────────
+// ─── planFromHistory ──────────────────────────────────────────────────────────
 
-describe('buildEffectiveLastLogs', () => {
-  const ex = makeEx({ id: 'ohp', working_set_type: 'top_set', working_rep_target: '5-8' })
+describe('planFromHistory', () => {
+  const NOW = new Date('2026-09-21T12:00:00Z')
+  const day = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString()
 
-  it('uses the newest session when the exercise was performed there', () => {
-    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 95, completed: true })]
-    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 90, completed: true })]
-    const logs = buildEffectiveLastLogs([ex], [newest, older])
-    expect(logs).toHaveLength(1)
-    expect(logs[0].actual_weight).toBe(95)
+  /** A completed working-set log in a session `daysAgo` days old. */
+  function hlog(opts: {
+    session: string
+    exercise: string
+    daysAgo: number
+    weight?: number | null
+    reps?: number
+    type?: SetLog['set_type']
+    index?: number
+    completed?: boolean
+  }): HistoryLog {
+    return {
+      ...makeSetLog({
+        session_id: opts.session,
+        exercise_template_id: opts.exercise,
+        set_type: opts.type ?? 'top',
+        set_index: opts.index ?? 0,
+        actual_weight: opts.weight === undefined ? 100 : opts.weight,
+        actual_reps: opts.reps ?? 4,
+        completed: opts.completed ?? true,
+      }),
+      session_started_at: day(opts.daysAgo),
+      session_completed_at: day(opts.daysAgo),
+    }
+  }
+  const same = (id: string) => id
+
+  it('uses the last performance and remaps logs onto the exercise id', () => {
+    const ex = makeEx({ id: 'ohp' })
+    const plan = planFromHistory([ex], [
+      hlog({ session: 'new', exercise: 'ohp', daysAgo: 3, weight: 95 }),
+      hlog({ session: 'old', exercise: 'ohp', daysAgo: 10, weight: 90 }),
+    ], same, NOW)
+    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([95])
+    expect(plan.lastLogs.every(l => l.exercise_template_id === 'ohp')).toBe(true)
+    expect(plan.comebacks).toEqual({})
   })
 
-  it('falls back to an older session when the exercise was skipped in the newest', () => {
-    // Skipped: logs exist but nothing completed
-    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, completed: false })]
-    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 90, completed: true })]
-    const logs = buildEffectiveLastLogs([ex], [newest, older])
-    expect(logs).toHaveLength(1)
-    expect(logs[0].actual_weight).toBe(90)
+  it('skips a session where the movement was skipped (nothing completed)', () => {
+    const ex = makeEx({ id: 'ohp' })
+    const plan = planFromHistory([ex], [
+      hlog({ session: 'skipped', exercise: 'ohp', daysAgo: 3, weight: null, completed: false }),
+      hlog({ session: 'done', exercise: 'ohp', daysAgo: 10, weight: 90 }),
+    ], same, NOW)
+    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([90])
+    expect(plan.lastLogs.map(l => l.actual_weight)).toEqual([90])
   })
 
-  it('falls back per exercise independently', () => {
+  it('pulls history from another program\'s copy of the same movement', () => {
+    // Weekly-program squat is a copy of the A/B squat
+    const weeklySquat = makeEx({ id: 'weekly-squat', movement_id: 'ab-squat' })
+    const movementOf = (id: string) => (id === 'weekly-squat' || id === 'ab-squat' ? 'ab-squat' : id)
+    const plan = planFromHistory([weeklySquat], [
+      hlog({ session: 's1', exercise: 'ab-squat', daysAgo: 5, weight: 290, reps: 2 }),
+    ], movementOf, NOW)
+    expect(plan.refLogs).toHaveLength(1)
+    expect(plan.refLogs[0].exercise_template_id).toBe('weekly-squat')
+    expect(plan.refLogs[0].actual_weight).toBe(290)
+  })
+
+  it('keeps movements apart even when they share a session', () => {
     const squat = makeEx({ id: 'squat' })
-    const newest = [
-      makeSetLog({ exercise_template_id: 'squat', set_type: 'top', actual_weight: 285, completed: true }),
-      makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, completed: false }),
-    ]
-    const older = [
-      makeSetLog({ exercise_template_id: 'squat', set_type: 'top', actual_weight: 280, completed: true }),
-      makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: 90, completed: true }),
-    ]
-    const logs = buildEffectiveLastLogs([squat, ex], [newest, older])
-    expect(logs.find(l => l.exercise_template_id === 'squat')?.actual_weight).toBe(285)
-    expect(logs.find(l => l.exercise_template_id === 'ohp')?.actual_weight).toBe(90)
+    const rdl = makeEx({ id: 'rdl' })
+    const plan = planFromHistory([squat, rdl], [
+      hlog({ session: 's1', exercise: 'squat', daysAgo: 5, weight: 290 }),
+      hlog({ session: 's1', exercise: 'rdl', daysAgo: 5, weight: 185 }),
+    ], same, NOW)
+    expect(plan.refLogs.find(l => l.exercise_template_id === 'squat')?.actual_weight).toBe(290)
+    expect(plan.refLogs.find(l => l.exercise_template_id === 'rdl')?.actual_weight).toBe(185)
   })
 
-  it('keeps the newest logs when the exercise was never performed (rep prefill parity)', () => {
-    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, actual_reps: 6, completed: false })]
-    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', actual_weight: null, actual_reps: 5, completed: false })]
-    const logs = buildEffectiveLastLogs([ex], [newest, older])
-    expect(logs).toHaveLength(1)
-    expect(logs[0].actual_reps).toBe(6)
+  it('puts only the lift with a long layoff into a comeback', () => {
+    const squat = makeEx({ id: 'squat' })   // trained 5 days ago
+    const ohp = makeEx({ id: 'ohp' })       // untouched for 30 days
+    const plan = planFromHistory([squat, ohp], [
+      hlog({ session: 's1', exercise: 'squat', daysAgo: 5, weight: 290 }),
+      hlog({ session: 's0', exercise: 'ohp', daysAgo: 30, weight: 110 }),
+    ], same, NOW)
+    expect(plan.comebacks.squat).toBeUndefined()
+    expect(plan.comebacks.ohp?.gapDays).toBe(30)
+    expect(plan.comebacks.ohp?.factor).toBe(0.75)
   })
 
-  it('drives initializeSession to generate warmups + backoff from the fallback session', () => {
-    const ohp = makeEx({
-      id: 'ohp',
-      working_set_type: 'top_set',
-      working_rep_target: '5-8',
-      warmup_rule: 'percentage_of_top_set',
-      warmup_percentages: [0, 0.68],
-      warmup_reps: [10, 5],
-      backoff_set_count: 1,
-      backoff_percentage: 0.78,
-      backoff_rep_target: '10-12',
-    })
-    const newest = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', set_index: 2, actual_weight: null, completed: false })]
-    const older  = [makeSetLog({ exercise_template_id: 'ohp', set_type: 'top', set_index: 2, actual_weight: 90, actual_reps: 6, completed: true })]
+  it('builds a comeback from the pre-gap benchmark, not the ramp session', () => {
+    const ex = makeEx({ id: 'squat' })
+    // Benchmark 40 days ago, a 35-day gap, then one comeback session 5 days ago
+    const plan = planFromHistory([ex], [
+      hlog({ session: 'ramp1', exercise: 'squat', daysAgo: 5, weight: 220 }),
+      hlog({ session: 'bench', exercise: 'squat', daysAgo: 40, weight: 290 }),
+    ], same, NOW)
+    expect(plan.comebacks.squat?.comebackSessionsDone).toBe(1)
+    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([290])       // weights from benchmark
+    expect(plan.lastLogs.map(l => l.actual_weight)).toEqual([220])      // deltas vs last time
+  })
 
-    const sets = initializeSession([ohp], buildEffectiveLastLogs([ohp], [newest, older]))
-    expect(sets.map(s => s.set_type)).toEqual(['warmup', 'warmup', 'top', 'backoff'])
-    expect(sets[2].target_weight).toBe(90)
+  it('ends a comeback early once a session since the gap matched the benchmark', () => {
+    const ex = makeEx({ id: 'bench' })
+    // 235 before a 25-day layoff, then came straight back at 240
+    const plan = planFromHistory([ex], [
+      hlog({ session: 'back', exercise: 'bench', daysAgo: 5, weight: 240 }),
+      hlog({ session: 'pre', exercise: 'bench', daysAgo: 30, weight: 235 }),
+    ], same, NOW)
+    expect(plan.comebacks.bench).toBeUndefined()
+    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([240])  // builds from the recent session
+  })
+
+  it('keeps ramping while sessions since the gap stay below the benchmark', () => {
+    const ex = makeEx({ id: 'bench' })
+    const plan = planFromHistory([ex], [
+      hlog({ session: 'back', exercise: 'bench', daysAgo: 5, weight: 205 }),
+      hlog({ session: 'pre', exercise: 'bench', daysAgo: 30, weight: 235 }),
+    ], same, NOW)
+    expect(plan.comebacks.bench?.comebackSessionsDone).toBe(1)
+  })
+
+  it('falls back to newest logs when never performed (rep prefill parity)', () => {
+    const ex = makeEx({ id: 'ohp' })
+    const plan = planFromHistory([ex], [
+      hlog({ session: 's1', exercise: 'ohp', daysAgo: 3, weight: null, reps: 6, completed: false }),
+    ], same, NOW)
+    expect(plan.lastLogs.map(l => l.actual_reps)).toEqual([6])
+  })
+
+  it('drives initializeSession with per-exercise comeback factors', () => {
+    const squat = makeEx({ id: 'squat' })
+    const ohp = makeEx({ id: 'ohp' })
+    const plan = planFromHistory([squat, ohp], [
+      hlog({ session: 's1', exercise: 'squat', daysAgo: 5, weight: 290, reps: 2 }),
+      hlog({ session: 's0', exercise: 'ohp', daysAgo: 30, weight: 100, reps: 4 }),
+    ], same, NOW)
+    const factors = Object.fromEntries(Object.entries(plan.comebacks).map(([id, c]) => [id, c.factor]))
+    const sets = initializeSession([squat, ohp], plan.refLogs, factors)
+    expect(sets.find(s => s.exercise_template_id === 'squat')?.target_weight).toBe(290) // full
+    expect(sets.find(s => s.exercise_template_id === 'ohp')?.target_weight).toBe(75)    // 100 × 0.75
   })
 })
 
-// ─── orderReferenceSessionIds ─────────────────────────────────────────────────
+describe('movementKey', () => {
+  it('is the row id for an original and the original\'s id for a copy', () => {
+    expect(movementKey({ id: 'a', movement_id: null })).toBe('a')
+    expect(movementKey({ id: 'b', movement_id: 'a' })).toBe('a')
+  })
+})
 
-describe('orderReferenceSessionIds', () => {
-  const sessions = ['s1', 's2', 's3', 's4', 's5', 's6'].map(id => makeSession({ id }))
+// ─── Weekly schedule ──────────────────────────────────────────────────────────
 
-  it('caps at the limit, newest-first', () => {
-    expect(orderReferenceSessionIds(sessions, null, 5)).toEqual(['s1', 's2', 's3', 's4', 's5'])
+describe('startOfWeek', () => {
+  it('returns Monday 00:00 for any day of the week', () => {
+    const mon = startOfWeek(new Date(2026, 8, 21, 15, 0))  // Mon Sep 21
+    const sun = startOfWeek(new Date(2026, 8, 27, 23, 0))  // Sun Sep 27
+    expect(mon.getDay()).toBe(1)
+    expect(mon.getDate()).toBe(21)
+    expect(mon.getHours()).toBe(0)
+    expect(sun.getDate()).toBe(21)  // Sunday belongs to the week that started Monday
+  })
+})
+
+describe('buildWeekPlan', () => {
+  // JS weekdays: Sun 0 … Sat 6
+  const mon    = makeTemplate({ id: 'mon', scheduled_days: [1] })
+  const tue    = makeTemplate({ id: 'tue', scheduled_days: [2], is_optional: true })
+  const wed    = makeTemplate({ id: 'wed', scheduled_days: [3] })
+  const friSat = makeTemplate({ id: 'fs',  scheduled_days: [5, 6] })
+  const sun    = makeTemplate({ id: 'sun', scheduled_days: [0] })
+  const all = [sun, friSat, wed, tue, mon]   // deliberately unordered
+  const done = (templateId: string, when: Date) =>
+    makeSession({ id: templateId + when.getTime(), workout_template_id: templateId, completed_at: when.toISOString() })
+
+  it('orders slots Monday → Sunday', () => {
+    const plan = buildWeekPlan(all, [], new Date(2026, 8, 21, 12))
+    expect(plan.map(s => s.template.id)).toEqual(['mon', 'tue', 'wed', 'fs', 'sun'])
   })
 
-  it('puts the benchmark session first during a comeback', () => {
-    const comeback = {
-      benchmarkSessionId: 's4', gapDays: 30, comebackSessionsDone: 1,
-      comebackSessionsTotal: 3, factor: 0.8, sessionsRemaining: 2,
-    }
-    expect(orderReferenceSessionIds(sessions, comeback, 5)).toEqual(['s4', 's1', 's2', 's3', 's5'])
+  it('marks today, missed, skipped (optional) and upcoming by weekday', () => {
+    const thu = new Date(2026, 8, 24, 12)  // Thursday
+    const plan = buildWeekPlan(all, [done('wed', new Date(2026, 8, 23, 12))], thu)
+    const status = Object.fromEntries(plan.map(s => [s.template.id, s.status]))
+    expect(status).toEqual({ mon: 'missed', tue: 'skipped', wed: 'done', fs: 'upcoming', sun: 'upcoming' })
   })
 
-  it('includes the benchmark even when outside the cap', () => {
-    const comeback = {
-      benchmarkSessionId: 's6', gapDays: 30, comebackSessionsDone: 1,
-      comebackSessionsTotal: 3, factor: 0.8, sessionsRemaining: 2,
-    }
-    expect(orderReferenceSessionIds(sessions, comeback, 5)[0]).toBe('s6')
+  it('treats a multi-day workout as today on either of its days', () => {
+    const sat = new Date(2026, 8, 26, 12)
+    expect(buildWeekPlan([friSat], [], sat)[0].status).toBe('today')
+  })
+
+  it('ignores sessions completed before this week', () => {
+    const lastSunday = new Date(2026, 8, 20, 12)
+    const plan = buildWeekPlan([mon], [done('mon', lastSunday)], new Date(2026, 8, 21, 12))
+    expect(plan[0].status).toBe('today')
+  })
+
+  it('leaves rotation-style workouts (no days) out of the plan', () => {
+    const rotation = makeTemplate({ id: 'a', scheduled_days: null })
+    expect(buildWeekPlan([rotation, mon], [], new Date(2026, 8, 21, 12)).map(s => s.template.id)).toEqual(['mon'])
+  })
+})
+
+describe('pickFeaturedSlot', () => {
+  const t = (id: string, optional = false) => makeTemplate({ id, is_optional: optional })
+  it('prefers today, then the next required session, then a missed one', () => {
+    expect(pickFeaturedSlot([
+      { template: t('a'), days: [0], status: 'missed' },
+      { template: t('b'), days: [2], status: 'today' },
+    ])?.template.id).toBe('b')
+    expect(pickFeaturedSlot([
+      { template: t('opt', true), days: [1], status: 'upcoming' },
+      { template: t('req'), days: [2], status: 'upcoming' },
+    ])?.template.id).toBe('req')
+    expect(pickFeaturedSlot([
+      { template: t('a'), days: [0], status: 'missed' },
+      { template: t('b'), days: [1], status: 'done' },
+    ])?.template.id).toBe('a')
+  })
+  it('returns null when everything is done', () => {
+    expect(pickFeaturedSlot([{ template: t('a'), days: [0], status: 'done' }])).toBeNull()
   })
 })

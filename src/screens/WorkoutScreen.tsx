@@ -7,17 +7,16 @@ import {
   deleteSetLog,
   getExerciseNotes,
   getExerciseTemplate,
-  getExerciseTemplates,
-  getRecentCompletedSessionsForTemplate,
+  getSession,
   getSetLogsForExercise,
   getSetLogsForSession,
-  getSetLogsForSessions,
-  getWorkoutTemplates,
+  getWorkoutTemplate,
   saveExerciseNote,
   updateSetLog,
 } from '../lib/db'
-import { barWeightForType, buildEffectiveLastLogs, calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, detectComeback, initializeSession, orderReferenceSessionIds } from '../lib/calculations'
+import { barWeightForType, calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, initializeSession } from '../lib/calculations'
 import type { ComebackInfo } from '../lib/calculations'
+import { planSession, summarizeComebacks, type ComebackSummary } from '../lib/sessionPlan'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
 import RestTimer from '../components/RestTimer'
 
@@ -28,10 +27,10 @@ interface WorkoutData {
   template: WorkoutTemplate
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
-  lastSetLogs: SetLog[]           // most recent completed session (display comparison)
-  refLogs: SetLog[]               // per-exercise fallback logs weights derived from
+  lastSetLogs: SetLog[]           // each exercise's last performance (display comparison)
+  refLogs: SetLog[]               // what each exercise's weights derived from
   stalenessMap: Record<string, number>
-  comeback: ComebackInfo | null
+  comebacks: Record<string, ComebackInfo>   // per exercise id; absent = full weight
   // Maps primary exercise ID → its alternate ExerciseTemplate (preloaded)
   altExercises: Map<string, ExerciseTemplate>
 }
@@ -372,6 +371,7 @@ function ExerciseCard({
   onAddSet,
   onRemoveSet,
   addingSet,
+  comeback,
   note,
   staleness,
   skipped,
@@ -393,6 +393,8 @@ function ExerciseCard({
   onAddSet: (exerciseId: string) => void
   onRemoveSet: (logId: string) => void
   addingSet: boolean
+  /** This lift's own comeback ramp, if it's in one. */
+  comeback?: ComebackInfo
   note: NoteEntry
   staleness: number
   skipped: boolean
@@ -508,6 +510,11 @@ function ExerciseCard({
                     <polyline points="17 6 23 6 23 12" />
                   </svg>
                   +{exercise.weight_increment} {unit.label} · earned last time
+                </span>
+              )}
+              {comeback && (
+                <span className="text-xs font-semibold text-caution bg-caution/10 border border-caution/25 rounded px-1.5 py-0.5">
+                  {Math.round(comeback.factor * 100)}% · coming back {comeback.comebackSessionsDone + 1}/{comeback.comebackSessionsTotal}
                 </span>
               )}
               {exercise.notes && (
@@ -648,46 +655,27 @@ function CollapsibleBlock({ title, text }: { title: string; text: string }) {
 
 // ─── Comeback banner ──────────────────────────────────────────────────────────
 
-function ComebackBanner({ info, onDismiss }: { info: ComebackInfo; onDismiss: () => void }) {
-  const session = info.comebackSessionsDone + 1
-  const total   = info.comebackSessionsTotal
-  const pct     = Math.round(info.factor * 100)
-  const last    = info.sessionsRemaining === 1
-
+function ComebackBanner({ summary, onDismiss }: { summary: ComebackSummary; onDismiss: () => void }) {
+  const lifts = summary.count === 1 ? '1 lift' : `${summary.count} lifts`
   return (
-    <div className="bg-caution/10 border border-caution/30 rounded-2xl p-4 flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-caution">
-            Coming back · {info.gapDays} days off
-          </p>
-          <p className="text-xs text-ink-secondary mt-0.5">
-            Session {session} of {total} · weights at {pct}%
-            {last ? ' · back to full next session' : ''}
-          </p>
-        </div>
-        <button
-          onClick={onDismiss}
-          className="w-6 h-6 flex items-center justify-center text-ink-disabled active:opacity-60 shrink-0"
-          aria-label="Dismiss"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+    <div className="bg-caution/10 border border-caution/30 rounded-2xl p-4 flex items-start justify-between gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-caution">
+          Coming back · up to {summary.gapDays} days off
+        </p>
+        <p className="text-xs text-ink-secondary mt-0.5">
+          {lifts} at reduced weight, ramping back to full over the next few times you do {summary.count === 1 ? 'it' : 'them'}.
+        </p>
       </div>
-
-      {/* Progress pips */}
-      <div className="flex gap-1.5">
-        {Array.from({ length: total }, (_, i) => (
-          <div
-            key={i}
-            className={`h-1 flex-1 rounded-full transition-colors ${
-              i < session ? 'bg-caution' : 'bg-edge'
-            }`}
-          />
-        ))}
-      </div>
+      <button
+        onClick={onDismiss}
+        className="w-6 h-6 flex items-center justify-center text-ink-disabled active:opacity-60 shrink-0"
+        aria-label="Dismiss"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
     </div>
   )
 }
@@ -748,94 +736,68 @@ export default function WorkoutScreen() {
       if (sessionId === 'new') {
         const templateId = searchParams.get('template')
         if (!templateId) throw new Error('No template specified')
+        const t = await getWorkoutTemplate(templateId)
+        if (!t) throw new Error('Workout not found')
+        template = t
 
-        const templates = await getWorkoutTemplates(
-          (await import('../lib/db').then(m => m.getActiveProgram()))?.id ?? '',
-        )
-        template = templates.find(t => t.id === templateId) ?? templates[0]
-
-        // Alternate-only exercises never render directly (and get no set
-        // logs at init) — they enter a session via the swap button only.
-        // They DO participate in reference-log building so swaps get
-        // history, deltas, and progression like any other exercise.
-        const allTemplateExercises = await getExerciseTemplates(templateId)
-        const exercises = allTemplateExercises.filter(e => !e.is_alternate_only)
-
-        // ── Comeback detection ─────────────────────────────────────────────
-        const recentSessions = await getRecentCompletedSessionsForTemplate(templateId, 10)
-        const comeback = detectComeback(recentSessions)
-
-        // Weight calculation walks recent sessions per exercise, so a lift
-        // skipped last time still pre-fills from the last time it was done.
-        // During a comeback the benchmark (pre-gap peak) session goes first.
-        // Display comparison ("prev" / delta badges) stays on the most
-        // recent completed session only.
-        const refSessionIds = orderReferenceSessionIds(recentSessions, comeback)
-        const allRefLogs = await getSetLogsForSessions(refSessionIds)
-        const logsBySession = refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id))
-        const effectiveLogs = buildEffectiveLastLogs(allTemplateExercises, logsBySession)
-        const prevLogs = recentSessions[0]
-          ? allRefLogs.filter(l => l.session_id === recentSessions[0].id)
-          : []
+        // Built from each exercise's movement history (not this workout's own
+        // past sessions): weights, a skipped lift's fallback to the last time
+        // it was actually done, and per-exercise comeback ramps
+        const plan = await planSession(templateId)
 
         session = await createSession(templateId)
-        const newLogs = initializeSession(exercises, effectiveLogs, comeback?.factor)
+        // Alternate-only exercises get no set logs here — they enter a
+        // session via the swap button, using the same plan
+        const newLogs = initializeSession(plan.exercises, plan.refLogs, plan.factors)
         setLogs = await createSetLogs(session.id, newLogs)
 
         navigate(`/workout/${session.id}`, { replace: true })
 
-        const exercises2 = (await getExerciseTemplates(templateId)).filter(e => !e.is_alternate_only)
         const [stalenessMap, altExercises] = await Promise.all([
-          buildStalenessMap(exercises2),
-          loadAltExercises(exercises2),
+          buildStalenessMap(plan.exercises),
+          loadAltExercises(plan.exercises),
         ])
-        setData({ session, template, exercises: exercises2, setLogs, lastSetLogs: prevLogs, refLogs: effectiveLogs, stalenessMap, comeback, altExercises })
+        setData({
+          session, template, exercises: plan.exercises, setLogs,
+          lastSetLogs: plan.lastLogs, refLogs: plan.refLogs,
+          stalenessMap, comebacks: plan.comebacks, altExercises,
+        })
         setNotes({})
       } else {
         if (!sessionId) throw new Error('No session ID')
-        // Load the session by id — resuming must work for exactly this
-        // session (e.g. a reopened one), not whichever is newest in-progress
-        const { getSession } = await import('../lib/db')
-        session = (await getSession(sessionId)) ?? { id: sessionId } as Session
+        // Load the session and its own workout by id — resuming must bind to
+        // exactly this session's workout, even from a program that's no
+        // longer active (e.g. reopening an old A/B session)
+        const s = await getSession(sessionId)
+        if (!s) throw new Error('Session not found')
+        session = s
+        const t = await getWorkoutTemplate(session.workout_template_id)
+        if (!t) throw new Error('Workout not found')
+        template = t
 
-        const { getActiveProgram } = await import('../lib/db')
-        const program = await getActiveProgram()
-        const templates = await getWorkoutTemplates(program?.id ?? '')
-        template = templates.find(t => t.id === session.workout_template_id) ?? templates[0]
-
-        const allTemplateExercises = await getExerciseTemplates(template.id)
-        const exercises = allTemplateExercises.filter(e => !e.is_alternate_only)
         setLogs = await getSetLogsForSession(sessionId)
-
-        // ── Comeback detection (resume path) ──────────────────────────────
-        const recentSessions = await getRecentCompletedSessionsForTemplate(template.id, 10)
-        const comeback = detectComeback(recentSessions)
-
-        // Weights were already initialized, but the progression chip needs the
-        // same per-exercise fallback logs init used; display comparison stays
-        // on the most recent completed session (excluding this one).
-        const priorSessions = recentSessions.filter(s => s.id !== sessionId)
-        const refSessionIds = orderReferenceSessionIds(priorSessions, comeback)
-        const allRefLogs = await getSetLogsForSessions(refSessionIds)
-        const refLogs = buildEffectiveLastLogs(
-          allTemplateExercises,
-          refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id)),
-        )
-        const lastLogs = priorSessions[0]
-          ? allRefLogs.filter(l => l.session_id === priorSessions[0].id)
-          : []
+        // Same plan the session was initialized from: exclude it from its own
+        // history and evaluate comebacks as of when it started
+        const plan = await planSession(template.id, {
+          excludeSessionId: sessionId,
+          now: new Date(session.started_at),
+        })
 
         const [existingNotes, stalenessMap, altExercises] = await Promise.all([
           getExerciseNotes(sessionId),
-          buildStalenessMap(exercises),
-          loadAltExercises(exercises),
+          buildStalenessMap(plan.exercises),
+          loadAltExercises(plan.exercises),
         ])
         const notesMap: Record<string, NoteEntry> = {}
         existingNotes.forEach(n => {
           notesMap[n.exercise_template_id] = { id: n.id, text: n.note }
         })
 
-        setData({ session, template, exercises, setLogs, lastSetLogs: lastLogs, refLogs, stalenessMap, comeback, altExercises })
+        setData({
+          session, template, exercises: plan.exercises, setLogs,
+          lastSetLogs: plan.lastLogs, refLogs: plan.refLogs,
+          stalenessMap, comebacks: plan.comebacks, altExercises,
+        })
         setNotes(notesMap)
       }
     } catch (e) {
@@ -1076,7 +1038,7 @@ export default function WorkoutScreen() {
         // (properly grouped), so init gets correct weights AND progression —
         // a raw multi-session log pile broke the all-sets-hit-target check
         const altPrevLogs = (data.refLogs ?? []).filter(l => l.exercise_template_id === altExercise.id)
-        const newLogs = initializeSession([altExercise], altPrevLogs, data.comeback?.factor)
+        const newLogs = initializeSession([altExercise], altPrevLogs, data.comebacks[altExercise.id]?.factor)
         const created = await createSetLogs(data.session.id, newLogs)
         setData(prev => prev ? { ...prev, setLogs: [...prev.setLogs, ...created] } : prev)
       }
@@ -1108,6 +1070,7 @@ export default function WorkoutScreen() {
   }
 
   const { template, exercises, setLogs } = data
+  const comebackSummary = summarizeComebacks(data.comebacks, exercises.map(e => e.id))
 
   const allWorkingSetsComplete = setLogs
     .filter(l => !skipped.has(l.exercise_template_id) && (l.set_type === 'top' || l.set_type === 'working' || l.set_type === 'backoff'))
@@ -1140,14 +1103,12 @@ export default function WorkoutScreen() {
     const exerciseSets = setLogs
       .filter(l => l.exercise_template_id === activeExercise.id)
       .sort((a, b) => a.set_index - b.set_index)
-    const lastSessionSets = data!.lastSetLogs
+    // Last time this movement was performed, in any workout or program
+    const prevExerciseSets = data!.lastSetLogs
       .filter(l => l.exercise_template_id === activeExercise.id)
       .sort((a, b) => a.set_index - b.set_index)
-    const refExerciseSets = (data!.refLogs ?? [])
+    const refExerciseSets = data!.refLogs
       .filter(l => l.exercise_template_id === activeExercise.id)
-    // Alternates usually weren't in the newest session — compare against the
-    // last session they were actually performed in instead
-    const prevExerciseSets = lastSessionSets.length > 0 ? lastSessionSets : refExerciseSets
 
     // The label shown on the swap button is always the OTHER option
     const altName = isSwapped ? primaryExercise.name : (altExercise?.name ?? null)
@@ -1162,6 +1123,7 @@ export default function WorkoutScreen() {
         onAddSet={handleAddSet}
         onRemoveSet={handleRemoveSet}
         addingSet={addingSet === activeExercise.id}
+        comeback={data!.comebacks[activeExercise.id]}
         note={notes[activeExercise.id] ?? { text: '' }}
         staleness={data!.stalenessMap[activeExercise.id] ?? 0}
         skipped={skipped.has(primaryExercise.id)}
@@ -1203,9 +1165,9 @@ export default function WorkoutScreen() {
         </div>
 
         {/* Comeback banner */}
-        {data.comeback && !comebackDismissed && (
+        {comebackSummary && !comebackDismissed && (
           <ComebackBanner
-            info={data.comeback}
+            summary={comebackSummary}
             onDismiss={() => setComebackDismissed(true)}
           />
         )}

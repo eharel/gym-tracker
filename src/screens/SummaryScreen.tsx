@@ -4,12 +4,11 @@ import { useUnit } from '../lib/units'
 import { buildGCalUrl } from '../lib/gcal'
 import EditTimesModal from '../components/EditTimesModal'
 import {
-  getExerciseTemplates,
   getSetLogsForSession,
-  getWorkoutTemplates,
-  getActiveProgram,
+  getWorkoutTemplate,
   completeSession,
 } from '../lib/db'
+import { planSession } from '../lib/sessionPlan'
 import { hasEarnedProgression } from '../lib/calculations'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
 import { supabase } from '../lib/supabase'
@@ -63,7 +62,7 @@ interface SummaryData {
   template: WorkoutTemplate
   exercises: ExerciseTemplate[]
   setLogs: SetLog[]
-  lastSetLogs: SetLog[]   // previous completed session for this template
+  lastSetLogs: SetLog[]   // each lift's previous performance, in any workout
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -96,23 +95,17 @@ export default function SummaryScreen() {
         session.completed_at = new Date().toISOString()
       }
 
-      const program = await getActiveProgram()
-      const templates = await getWorkoutTemplates(program?.id ?? '')
-      const template = templates.find(t => t.id === session.workout_template_id) ?? templates[0]
-      const exercises = await getExerciseTemplates(template.id)
-      const setLogs = await getSetLogsForSession(id)
-
-      // Load previous session for comparison (exclude the current one)
-      const { data: prevSessRow } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('workout_template_id', session.workout_template_id)
-        .not('completed_at', 'is', null)
-        .neq('id', id)
-        .order('completed_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      const lastSetLogs = prevSessRow ? await getSetLogsForSession(prevSessRow.id) : []
+      // The session's own workout, whichever program it belongs to
+      const template = await getWorkoutTemplate(session.workout_template_id)
+      if (!template) throw new Error('Workout not found')
+      const [setLogs, plan] = await Promise.all([
+        getSetLogsForSession(id),
+        // "vs. last session" = each lift's previous performance anywhere,
+        // not just this workout's previous session
+        planSession(template.id, { excludeSessionId: id, now: new Date(session.started_at) }),
+      ])
+      const exercises = plan.allExercises
+      const lastSetLogs = plan.lastLogs
 
       setNote(session.notes ?? '')
       setData({ session, template, exercises, setLogs, lastSetLogs })

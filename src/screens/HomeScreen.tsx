@@ -3,14 +3,22 @@ import { useNavigate } from 'react-router-dom'
 import {
   createStarterProgram,
   getActiveProgram,
-  getCompletedSessions,
   getExerciseTemplates,
   getHomeStats,
   getInProgressSession,
+  getProfileCompletedSessions,
+  getWorkoutTemplate,
   getWorkoutTemplates,
   type HomeStats,
 } from '../lib/db'
-import { getNextWorkoutTemplate } from '../lib/calculations'
+import {
+  buildWeekPlan,
+  getNextWorkoutTemplate,
+  isWeeklyProgram,
+  pickFeaturedSlot,
+  type WeekSlot,
+  type WeekSlotStatus,
+} from '../lib/calculations'
 import { useProfileStore } from '../store/profile'
 import { useUnit } from '../lib/units'
 import type { ExerciseTemplate, Program, Session, WorkoutTemplate } from '../types'
@@ -20,9 +28,13 @@ import type { ExerciseTemplate, Program, Session, WorkoutTemplate } from '../typ
 interface HomeData {
   program: Program
   templates: WorkoutTemplate[]
-  sessions: Session[]
-  nextTemplate: WorkoutTemplate
+  sessions: Session[]            // every completed session of the profile
+  /** The workout to feature; null when a weekly plan is fully done. */
+  nextTemplate: WorkoutTemplate | null
+  nextLabel: string
   nextExercises: ExerciseTemplate[]
+  /** This week's plan for weekly programs; null for A/B rotation. */
+  weekPlan: WeekSlot[] | null
   lastSession: Session | null
   lastTemplate: WorkoutTemplate | null
   stats: HomeStats
@@ -59,10 +71,12 @@ function StatCell({ label, value, unit }: { label: string; value: string; unit?:
 }
 
 function NextWorkoutCard({
+  label,
   template,
   exercises,
   onBegin,
 }: {
+  label: string
   template: WorkoutTemplate
   exercises: ExerciseTemplate[]
   onBegin: () => void
@@ -75,7 +89,7 @@ function NextWorkoutCard({
       <div>
         <div className="flex items-center gap-2 mb-2">
           <span className="w-2 h-2 rounded-full bg-accent" />
-          <p className="text-xs font-semibold text-accent uppercase tracking-widest">Up next</p>
+          <p className="text-xs font-semibold text-accent uppercase tracking-widest">{label}</p>
         </div>
         <h2 className="text-xl sm:text-2xl font-bold text-ink">{template.name}</h2>
       </div>
@@ -91,6 +105,67 @@ function NextWorkoutCard({
       >
         Preview Workout
       </button>
+    </div>
+  )
+}
+
+// ─── Week plan ───────────────────────────────────────────────────────────────
+
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+function StatusTag({ status, optional }: { status: WeekSlotStatus; optional: boolean }) {
+  switch (status) {
+    case 'done':
+      return (
+        <span className="w-5 h-5 rounded-full bg-positive flex items-center justify-center shrink-0" aria-label="Done">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </span>
+      )
+    case 'today':
+      return <span className="text-xs font-semibold text-accent shrink-0">Today</span>
+    case 'missed':
+      return <span className="text-xs font-medium text-caution shrink-0">Missed</span>
+    case 'skipped':
+      return <span className="text-xs text-ink-disabled shrink-0">Skipped</span>
+    case 'upcoming':
+      return optional
+        ? <span className="text-xs text-ink-disabled shrink-0">Optional</span>
+        : null
+  }
+}
+
+/** This week at a glance; tapping any row previews that workout — the
+ *  picker for doing a day's session early, late, or on its alternate day. */
+function WeekStrip({ plan, onPick }: { plan: WeekSlot[]; onPick: (t: WorkoutTemplate) => void }) {
+  return (
+    <div className="bg-surface/80 backdrop-blur border border-edge rounded-2xl p-4 flex flex-col gap-3">
+      <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest">This week</p>
+      <div className="flex flex-col gap-1">
+        {plan.map(slot => {
+          const muted = slot.status === 'done' || slot.status === 'skipped'
+          return (
+            <button
+              key={slot.template.id}
+              onClick={() => onPick(slot.template)}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left active:opacity-70 transition-colors ${
+                slot.status === 'today' ? 'bg-accent/10 border border-accent/30' : 'border border-transparent'
+              }`}
+            >
+              <span className={`w-14 shrink-0 text-xs font-semibold tabular-nums ${
+                slot.status === 'today' ? 'text-accent' : 'text-ink-disabled'
+              }`}>
+                {slot.days.map(d => DAY_NAMES[d]).join('/')}
+              </span>
+              <span className={`flex-1 min-w-0 text-sm truncate ${muted ? 'text-ink-disabled' : 'text-ink'}`}>
+                {slot.template.name}
+              </span>
+              <StatusTag status={slot.status} optional={slot.template.is_optional} />
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -286,22 +361,41 @@ export default function HomeScreen() {
 
       const [templates, sessions, stats, inProgress] = await Promise.all([
         getWorkoutTemplates(program.id),
-        getCompletedSessions(program.id),
-        getHomeStats(program.id, program.highlight_exercise_id ?? null),
+        getProfileCompletedSessions(),
+        getHomeStats(program.highlight_exercise_id ?? null),
         getInProgressSession(),
       ])
 
-      const nextTemplate = getNextWorkoutTemplate(sessions, templates)
-      const nextExercises = (await getExerciseTemplates(nextTemplate.id)).filter(e => !e.is_alternate_only)
+      let nextTemplate: WorkoutTemplate | null
+      let nextLabel = 'Up next'
+      let weekPlan: WeekSlot[] | null = null
+      if (isWeeklyProgram(templates)) {
+        weekPlan = buildWeekPlan(templates, sessions)
+        const featured = pickFeaturedSlot(weekPlan)
+        nextTemplate = featured?.template ?? null
+        nextLabel = featured?.status === 'today' ? 'Today'
+          : featured?.status === 'missed' ? 'Catch up'
+          : 'Up next'
+      } else {
+        // Rotation only follows this program's own sessions
+        const programSessions = sessions.filter(ps => templates.some(t => t.id === ps.workout_template_id))
+        nextTemplate = getNextWorkoutTemplate(programSessions, templates)
+      }
 
+      const nextExercises = nextTemplate
+        ? (await getExerciseTemplates(nextTemplate.id)).filter(e => !e.is_alternate_only)
+        : []
+
+      // The last session may belong to another program — look its workout up directly
       const lastSession = sessions[0] ?? null
       const lastTemplate = lastSession
-        ? (templates.find(t => t.id === lastSession.workout_template_id) ?? null)
+        ? (templates.find(t => t.id === lastSession.workout_template_id)
+            ?? await getWorkoutTemplate(lastSession.workout_template_id))
         : null
 
       setData({
         program, templates, sessions,
-        nextTemplate, nextExercises,
+        nextTemplate, nextLabel, nextExercises, weekPlan,
         lastSession, lastTemplate,
         stats, inProgress,
       })
@@ -324,7 +418,7 @@ export default function HomeScreen() {
   }
 
   function handleBegin() {
-    navigate(`/workout/preview?template=${data?.nextTemplate.id}`)
+    if (data?.nextTemplate) navigate(`/workout/preview?template=${data.nextTemplate.id}`)
   }
 
   async function handleCreateProgram() {
@@ -439,12 +533,28 @@ export default function HomeScreen() {
         {/* Consistency heatmap */}
         <ConsistencyCard sessions={data.sessions} />
 
-        {/* Next workout */}
-        <NextWorkoutCard
-          template={data.nextTemplate}
-          exercises={data.nextExercises}
-          onBegin={handleBegin}
-        />
+        {/* Featured workout */}
+        {data.nextTemplate ? (
+          <NextWorkoutCard
+            label={data.nextLabel}
+            template={data.nextTemplate}
+            exercises={data.nextExercises}
+            onBegin={handleBegin}
+          />
+        ) : (
+          <div className="bg-surface/80 border border-positive/30 rounded-2xl p-5 text-center">
+            <p className="text-base font-semibold text-positive">Week complete</p>
+            <p className="text-sm text-ink-secondary mt-1">Every session this week is done. Tap any day below to train anyway.</p>
+          </div>
+        )}
+
+        {/* Week plan (weekly programs) */}
+        {data.weekPlan && (
+          <WeekStrip
+            plan={data.weekPlan}
+            onPick={t => navigate(`/workout/preview?template=${t.id}`)}
+          />
+        )}
 
         {/* Last session */}
         {data.lastSession && data.lastTemplate && (

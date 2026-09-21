@@ -35,6 +35,10 @@ export interface WorkoutTemplate {
   order_in_program: number
   warmup_text: string | null
   cooldown_text: string | null
+  /** JS weekdays (0 = Sun … 6 = Sat). Null/empty = rotation-style workout. */
+  scheduled_days: number[] | null
+  /** Bonus session: shown as skipped rather than missed when not done. */
+  is_optional: boolean
   created_at: string
 }
 
@@ -57,6 +61,10 @@ export interface ExerciseTemplate {
   /** Lives in a template for ownership/history, but only renders when
    *  swapped in as another exercise's alternate. */
   is_alternate_only: boolean
+  /** The original this row was copied from (another program's slot for the
+   *  same lift). Null = this row is the movement's root. History, progression
+   *  and PRs span every row sharing a movement — see movementKey(). */
+  movement_id: string | null
 
   warmup_rule: WarmupRule
   warmup_percentages: number[] | null

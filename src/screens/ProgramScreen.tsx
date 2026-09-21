@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getActiveProgram, getWorkoutTemplates } from '../lib/db'
+import { getActiveProgram, getPrograms, getWorkoutTemplates, setActiveProgram } from '../lib/db'
 import { useSettingsStore } from '../store/settings'
 import { useProfileStore } from '../store/profile'
 import { useUnit } from '../lib/units'
 import { DEFAULT_THEME, THEMES } from '../lib/themes'
 import type { Program, WorkoutTemplate, UnitSystem } from '../types'
+
+const JS_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/** [5, 6] → "Fri/Sat" — listed Monday-first so Sunday comes last. */
+function formatDays(days: number[] | null): string | null {
+  if (!days?.length) return null
+  return [...days]
+    .sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7))
+    .map(d => JS_DAY_NAMES[d])
+    .join('/')
+}
 
 export default function ProgramScreen() {
   const navigate = useNavigate()
@@ -20,8 +31,23 @@ export default function ProgramScreen() {
   )
 
   const [program, setProgram] = useState<Program | null>(null)
+  const [programs, setPrograms] = useState<Program[]>([])
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null)
+
+  async function handleSwitchProgram(id: string) {
+    if (id === program?.id || switchingTo) return
+    setSwitchingTo(id)
+    try {
+      await setActiveProgram(id)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to switch program')
+    } finally {
+      setSwitchingTo(null)
+    }
+  }
 
   async function handleUnitChange(value: UnitSystem) {
     setSavingUnit(true)
@@ -35,20 +61,20 @@ export default function ProgramScreen() {
     finally { setSavingTheme(false) }
   }
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const p = await getActiveProgram()
-        if (!p) { setError('No active program found.'); return }
-        const t = await getWorkoutTemplates(p.id)
-        setProgram(p)
-        setTemplates(t)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load')
-      }
+  async function load() {
+    try {
+      const [p, all] = await Promise.all([getActiveProgram(), getPrograms()])
+      if (!p) { setError('No active program found.'); return }
+      const t = await getWorkoutTemplates(p.id)
+      setProgram(p)
+      setPrograms(all)
+      setTemplates(t)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load')
     }
-    load()
-  }, [])
+  }
+
+  useEffect(() => { load() }, [])
 
   if (error) return (
     <div className="min-h-screen flex items-center justify-center p-6">
@@ -83,10 +109,48 @@ export default function ProgramScreen() {
           </div>
         </div>
 
+        {/* Program switcher — only when there's something to switch between */}
+        {programs.length > 1 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest px-1">
+              Programs
+            </p>
+            <div className="bg-surface/80 border border-edge rounded-2xl p-1.5 flex flex-col gap-1 shadow-card">
+              {programs.map(p => {
+                const active = p.id === program.id
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handleSwitchProgram(p.id)}
+                    disabled={switchingTo !== null}
+                    className={`flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors disabled:opacity-60 ${
+                      active ? 'bg-accent/10' : 'active:opacity-70'
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                      active ? 'border-accent' : 'border-edge-strong'
+                    }`}>
+                      {active && <span className="w-2 h-2 rounded-full bg-accent" />}
+                    </span>
+                    <span className={`flex-1 text-sm font-semibold ${active ? 'text-ink' : 'text-ink-secondary'}`}>
+                      {p.name}
+                    </span>
+                    {switchingTo === p.id && <span className="text-xs text-ink-disabled">Switching…</span>}
+                    {active && <span className="text-xs font-medium text-accent">Active</span>}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-ink-disabled px-1">
+              Your history, weights and PRs carry across programs.
+            </p>
+          </div>
+        )}
+
         {/* Workout templates */}
         <div className="flex flex-col gap-2">
           <p className="text-xs font-semibold text-ink-disabled uppercase tracking-widest px-1">
-            Workout templates
+            Workouts
           </p>
           {templates.map(t => (
             <button
@@ -96,11 +160,16 @@ export default function ProgramScreen() {
             >
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-ink">{t.name}</p>
-                {(t.warmup_text || t.cooldown_text) && (
+                {(t.scheduled_days?.length || t.warmup_text || t.cooldown_text) ? (
                   <p className="text-xs text-ink-disabled mt-0.5">
-                    {[t.warmup_text && 'warmup', t.cooldown_text && 'cooldown'].filter(Boolean).join(' · ')}
+                    {[
+                      formatDays(t.scheduled_days),
+                      t.is_optional && 'optional',
+                      t.warmup_text && 'warmup',
+                      t.cooldown_text && 'cooldown',
+                    ].filter(Boolean).join(' · ')}
                   </p>
-                )}
+                ) : null}
               </div>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink-disabled shrink-0">
                 <polyline points="9 18 15 12 9 6" />

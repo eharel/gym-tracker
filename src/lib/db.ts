@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { requireProfileId } from '../store/profile'
+import { movementKey, type HistoryLog } from './calculations'
 import type {
   ExerciseNote,
   ExerciseTemplate,
@@ -27,6 +28,34 @@ export async function getActiveProgram(): Promise<Program | null> {
     .maybeSingle()
   if (error) throw error
   return data
+}
+
+/** Every program belonging to the current profile, oldest first. */
+export async function getPrograms(): Promise<Program[]> {
+  const { data, error } = await supabase
+    .from('programs')
+    .select('*')
+    .eq('profile_id', requireProfileId())
+    .order('created_at')
+  if (error) throw error
+  return data ?? []
+}
+
+/** Makes one program active and every other program of the profile inactive. */
+export async function setActiveProgram(programId: string): Promise<void> {
+  const profileId = requireProfileId()
+  const { error: offErr } = await supabase
+    .from('programs')
+    .update({ is_active: false })
+    .eq('profile_id', profileId)
+    .neq('id', programId)
+  if (offErr) throw offErr
+  const { error } = await supabase
+    .from('programs')
+    .update({ is_active: true })
+    .eq('id', programId)
+    .eq('profile_id', profileId)
+  if (error) throw error
 }
 
 /** Creates a program with two empty workout templates — the first-run path
@@ -59,6 +88,18 @@ export async function getWorkoutTemplates(programId: string): Promise<WorkoutTem
   return data
 }
 
+/** One workout by id, whichever program it belongs to — sessions must bind to
+ *  their own workout even when a different program is active. */
+export async function getWorkoutTemplate(id: string): Promise<WorkoutTemplate | null> {
+  const { data, error } = await supabase
+    .from('workout_templates')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
 // ─── Exercise templates ──────────────────────────────────────────────────────
 
 export async function getExerciseTemplates(workoutTemplateId: string): Promise<ExerciseTemplate[]> {
@@ -81,6 +122,75 @@ export async function getExerciseTemplate(id: string): Promise<ExerciseTemplate 
   return data
 }
 
+// ─── Movements ───────────────────────────────────────────────────────────────
+
+/**
+ * Every exercise row sharing a movement with the given ones, across all
+ * programs. `movementOf` maps any of those row ids to its movement key.
+ */
+async function resolveMovements(
+  exercises: Pick<ExerciseTemplate, 'id' | 'movement_id'>[],
+): Promise<{ siblingIds: string[]; movementOf: (id: string) => string }> {
+  const keys = [...new Set(exercises.map(movementKey))]
+  if (keys.length === 0) return { siblingIds: [], movementOf: id => id }
+  const list = keys.join(',')
+  const { data, error } = await supabase
+    .from('exercise_templates')
+    .select('id, movement_id')
+    .or(`id.in.(${list}),movement_id.in.(${list})`)
+  if (error) throw error
+  const movementById = new Map<string, string>(
+    (data ?? []).map(r => [r.id as string, (r.movement_id as string | null) ?? (r.id as string)]),
+  )
+  return {
+    siblingIds: [...movementById.keys()],
+    movementOf: id => movementById.get(id) ?? id,
+  }
+}
+
+/**
+ * Working-set logs (warmups excluded — they're template-driven) from
+ * completed sessions, for every copy of the given exercises' movements.
+ * Feeds planFromHistory. Paginates past PostgREST's 1000-row page size.
+ */
+export async function getMovementHistory(
+  exercises: ExerciseTemplate[],
+  opts: { excludeSessionId?: string; sinceDays?: number } = {},
+): Promise<{ logs: HistoryLog[]; movementOf: (id: string) => string }> {
+  const { siblingIds, movementOf } = await resolveMovements(exercises)
+  if (siblingIds.length === 0) return { logs: [], movementOf }
+
+  const since = new Date(Date.now() - (opts.sinceDays ?? 180) * 86_400_000).toISOString()
+  const PAGE = 1000
+  const logs: HistoryLog[] = []
+  type Row = SetLog & { sessions: { started_at: string; completed_at: string } }
+
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase
+      .from('set_logs')
+      .select('*, sessions!inner(started_at, completed_at)')
+      .in('exercise_template_id', siblingIds)
+      .neq('set_type', 'warmup')
+      .not('sessions.completed_at', 'is', null)
+      .gte('sessions.completed_at', since)
+      .order('created_at', { ascending: false })
+      .range(from, from + PAGE - 1)
+    if (opts.excludeSessionId) q = q.neq('session_id', opts.excludeSessionId)
+    const { data, error } = await q
+    if (error) throw error
+    for (const row of (data ?? []) as unknown as Row[]) {
+      const { sessions, ...log } = row
+      logs.push({
+        ...log,
+        session_started_at: sessions.started_at,
+        session_completed_at: sessions.completed_at,
+      })
+    }
+    if (!data || data.length < PAGE) break
+  }
+  return { logs, movementOf }
+}
+
 export async function getProgramExercises(programId: string): Promise<ExerciseTemplate[]> {
   const { data, error } = await supabase
     .from('exercise_templates')
@@ -95,15 +205,22 @@ export async function getProgramExercises(programId: string): Promise<ExerciseTe
 export type ProgressLog = SetLog & { session_completed_at: string }
 
 /**
- * All completed top/working set logs for the given exercises, from completed
- * sessions only — one query for the whole progress overview.
+ * All completed top/working set logs for the given exercises' movements,
+ * from completed sessions — remapped onto the given rows so a program's
+ * progress includes history logged under other programs' copies.
  */
-export async function getProgressLogs(exerciseIds: string[]): Promise<ProgressLog[]> {
-  if (exerciseIds.length === 0) return []
+export async function getProgressLogs(exercises: ExerciseTemplate[]): Promise<ProgressLog[]> {
+  if (exercises.length === 0) return []
+  const { siblingIds, movementOf } = await resolveMovements(exercises)
+  const exerciseByMovement = new Map<string, string>()
+  for (const ex of exercises) {
+    const key = movementKey(ex)
+    if (!exerciseByMovement.has(key)) exerciseByMovement.set(key, ex.id)
+  }
   const { data, error } = await supabase
     .from('set_logs')
     .select('*, sessions!inner(completed_at)')
-    .in('exercise_template_id', exerciseIds)
+    .in('exercise_template_id', siblingIds)
     .in('set_type', ['top', 'working'])
     .eq('completed', true)
     .not('sessions.completed_at', 'is', null)
@@ -111,6 +228,7 @@ export async function getProgressLogs(exerciseIds: string[]): Promise<ProgressLo
   type Row = SetLog & { sessions: { completed_at: string } }
   return (data as unknown as Row[]).map(({ sessions, ...log }) => ({
     ...log,
+    exercise_template_id: exerciseByMovement.get(movementOf(log.exercise_template_id)) ?? log.exercise_template_id,
     session_completed_at: sessions.completed_at,
   }))
 }
@@ -141,48 +259,16 @@ export async function reorderExerciseTemplates(
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
-/** Returns all completed sessions for a program, newest-first. */
-export async function getCompletedSessions(programId: string): Promise<Session[]> {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('*, workout_templates!inner(program_id)')
-    .eq('workout_templates.program_id', programId)
-    .not('completed_at', 'is', null)
-    .order('completed_at', { ascending: false })
-  if (error) throw error
-  return data
-}
-
-/** Returns the most recent N completed sessions for a template, newest-first. */
-export async function getRecentCompletedSessionsForTemplate(
-  workoutTemplateId: string,
-  limit = 10,
-): Promise<Session[]> {
+/** Every completed session of the current profile, across programs, newest-first. */
+export async function getProfileCompletedSessions(): Promise<Session[]> {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
-    .eq('workout_template_id', workoutTemplateId)
+    .eq('profile_id', requireProfileId())
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
-    .limit(limit)
   if (error) throw error
   return data ?? []
-}
-
-/** Returns the most recent completed session for a specific workout template. */
-export async function getLastSessionForTemplate(
-  workoutTemplateId: string,
-): Promise<Session | null> {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('*')
-    .eq('workout_template_id', workoutTemplateId)
-    .not('completed_at', 'is', null)
-    .order('completed_at', { ascending: false })
-    .limit(1)
-    .single()
-  if (error) { if (error.code === 'PGRST116') return null; throw error }
-  return data
 }
 
 /** Returns the current profile's in-progress session, if any. */
@@ -207,17 +293,6 @@ export async function createSession(workoutTemplateId: string): Promise<Session>
     .single()
   if (error) throw error
   return data
-}
-
-/** Set logs for several sessions in one query (order not guaranteed). */
-export async function getSetLogsForSessions(sessionIds: string[]): Promise<SetLog[]> {
-  if (sessionIds.length === 0) return []
-  const { data, error } = await supabase
-    .from('set_logs')
-    .select('*')
-    .in('session_id', sessionIds)
-  if (error) throw error
-  return data ?? []
 }
 
 export async function getSession(sessionId: string): Promise<Session | null> {
@@ -324,18 +399,29 @@ export async function getSetLogsForSession(sessionId: string): Promise<SetLog[]>
 
 /** Returns set_logs for a given exercise across all sessions, newest-first.
  *  Used by calcStaleness and session initialization. */
+/**
+ * Recent logs for an exercise's whole movement (every program's copy),
+ * newest-first, remapped onto the requested id so callers can filter by it.
+ */
 export async function getSetLogsForExercise(
   exerciseTemplateId: string,
   limit = 20,
 ): Promise<SetLog[]> {
+  const { data: ex, error: exErr } = await supabase
+    .from('exercise_templates')
+    .select('id, movement_id')
+    .eq('id', exerciseTemplateId)
+    .maybeSingle()
+  if (exErr) throw exErr
+  const { siblingIds } = await resolveMovements(ex ? [ex] : [{ id: exerciseTemplateId, movement_id: null }])
   const { data, error } = await supabase
     .from('set_logs')
     .select('*')
-    .eq('exercise_template_id', exerciseTemplateId)
+    .in('exercise_template_id', siblingIds.length ? siblingIds : [exerciseTemplateId])
     .order('created_at', { ascending: false })
     .limit(limit)
   if (error) throw error
-  return data
+  return (data ?? []).map(l => ({ ...l, exercise_template_id: exerciseTemplateId }))
 }
 
 /** Bulk-inserts the pre-populated set_logs generated by initializeSession. */
@@ -475,13 +561,14 @@ export interface HomeStats {
 }
 
 export async function getHomeStats(
-  programId: string,
   highlightExerciseId: string | null,
 ): Promise<HomeStats> {
+  // Counts are per person, not per program — switching programs doesn't
+  // reset your training history
   const sessionsRes = await supabase
     .from('sessions')
-    .select('id, completed_at, workout_templates!inner(program_id)', { count: 'exact' })
-    .eq('workout_templates.program_id', programId)
+    .select('id, completed_at', { count: 'exact' })
+    .eq('profile_id', requireProfileId())
     .not('completed_at', 'is', null)
   if (sessionsRes.error) throw sessionsRes.error
 
@@ -489,17 +576,25 @@ export async function getHomeStats(
   let highlightExerciseName = ''
 
   if (highlightExerciseId) {
-    const [nameRes, prRes] = await Promise.all([
-      supabase.from('exercise_templates').select('name').eq('id', highlightExerciseId).single(),
-      supabase.from('set_logs').select('actual_weight')
-        .eq('exercise_template_id', highlightExerciseId)
+    const { data: ex, error: exErr } = await supabase
+      .from('exercise_templates')
+      .select('id, name, movement_id')
+      .eq('id', highlightExerciseId)
+      .maybeSingle()
+    if (!exErr && ex) {
+      highlightExerciseName = ex.name
+      // PR across every program's copy of the lift
+      const { siblingIds } = await resolveMovements([ex])
+      const { data: pr } = await supabase
+        .from('set_logs')
+        .select('actual_weight')
+        .in('exercise_template_id', siblingIds)
         .eq('set_type', 'top')
         .not('actual_weight', 'is', null)
         .order('actual_weight', { ascending: false })
-        .limit(1),
-    ])
-    if (!nameRes.error && nameRes.data) highlightExerciseName = nameRes.data.name
-    highlightPR = prRes.data?.[0]?.actual_weight ?? null
+        .limit(1)
+      highlightPR = pr?.[0]?.actual_weight ?? null
+    }
   }
 
   const now = new Date()

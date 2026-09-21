@@ -272,6 +272,7 @@ export default function ExerciseEditorScreen() {
       bar_type: barType,
       alternate_exercise_id: alternateExerciseId,
       is_alternate_only: exercise?.is_alternate_only ?? false,
+      movement_id: exercise?.movement_id ?? null,
 
       warmup_rule: warmupRule,
       warmup_percentages: warmupRule === 'percentage_of_top_set' ? parseNumbers(warmupPercentages) : null,
@@ -315,6 +316,7 @@ export default function ExerciseEditorScreen() {
           bar_type: 'none',
           alternate_exercise_id: null,
           is_alternate_only: true,
+          movement_id: null,
           warmup_rule: 'none',
           warmup_percentages: null,
           warmup_reps: null,

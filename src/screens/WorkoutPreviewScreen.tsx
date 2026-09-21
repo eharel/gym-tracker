@@ -2,16 +2,11 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useUnit } from '../lib/units'
 import { barWeightForType } from '../lib/calculations'
-import {
-  getExerciseTemplates,
-  getRecentCompletedSessionsForTemplate,
-  getSetLogsForSessions,
-  getWorkoutTemplates,
-} from '../lib/db'
-import { buildEffectiveLastLogs, detectComeback, initializeSession, orderReferenceSessionIds } from '../lib/calculations'
+import { getWorkoutTemplate } from '../lib/db'
+import { initializeSession } from '../lib/calculations'
 import type { ComebackInfo } from '../lib/calculations'
+import { planSession, summarizeComebacks, type ComebackSummary } from '../lib/sessionPlan'
 import type { ExerciseTemplate, NewSetLog, SetLog, WorkoutTemplate } from '../types'
-import { getActiveProgram } from '../lib/db'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,9 +14,9 @@ interface PreviewData {
   template:    WorkoutTemplate
   exercises:   ExerciseTemplate[]
   sets:        NewSetLog[]       // computed, NOT written to DB
-  lastSetLogs: SetLog[]          // most recent session, for prev display
-  refLogs:     SetLog[]          // per-exercise fallback logs weights derive from
-  comeback:    ComebackInfo | null
+  lastSetLogs: SetLog[]          // each exercise's last performance, for prev display
+  refLogs:     SetLog[]          // what each exercise's weights derive from
+  comebacks:   Record<string, ComebackInfo>
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -53,32 +48,20 @@ function setTypeMeta(type: NewSetLog['set_type']): SetTypeMeta {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function ComebackBadge({ info }: { info: ComebackInfo }) {
+function ComebackBadge({ summary }: { summary: ComebackSummary }) {
+  const lifts = summary.count === 1 ? '1 lift' : `${summary.count} lifts`
   return (
-    <div className="bg-caution/10 border border-caution/30 rounded-2xl p-4 flex flex-col gap-3">
-      <div>
-        <p className="text-sm font-semibold text-caution">
-          Comeback · {info.gapDays} days off
-        </p>
-        <p className="text-xs text-ink-secondary mt-0.5">
-          Session {info.comebackSessionsDone + 1} of {info.comebackSessionsTotal} ·{' '}
-          weights at {Math.round(info.factor * 100)}%
-          {info.sessionsRemaining === 1 ? ' · back to full next session' : ''}
-        </p>
-      </div>
-      <div className="flex gap-1.5">
-        {Array.from({ length: info.comebackSessionsTotal }, (_, i) => (
-          <div key={i} className={`h-1 flex-1 rounded-full ${
-            i < info.comebackSessionsDone + 1 ? 'bg-caution' : 'bg-edge'
-          }`} />
-        ))}
-      </div>
+    <div className="bg-caution/10 border border-caution/30 rounded-2xl p-4">
+      <p className="text-sm font-semibold text-caution">
+        Comeback · up to {summary.gapDays} days off
+      </p>
+      <p className="text-xs text-ink-secondary mt-0.5">
+        {lifts} at reduced weight, ramping back to full.
+      </p>
     </div>
   )
 }
 
-// Disclosure row, deliberately NOT button-shaped: chevron-led flat text so it
-// reads as "content folded here" rather than an action
 function CollapsibleBlock({ title, text }: { title: string; text: string }) {
   const [open, setOpen] = useState(false)
   return (
@@ -150,11 +133,13 @@ function PreviewExerciseCard({
   sets,
   lastSetLogs,
   refLogs,
+  comeback,
 }: {
   exercise:    ExerciseTemplate
   sets:        NewSetLog[]
   lastSetLogs: SetLog[]
   refLogs:     SetLog[]
+  comeback?:   ComebackInfo
 }) {
   const unit       = useUnit()
   const barWeight  = barWeightForType(exercise.bar_type)
@@ -189,6 +174,11 @@ function PreviewExerciseCard({
             )}
             {prevWeight !== null && (
               <span className="text-xs text-ink-disabled">prev {prevWeight} {unit.label}</span>
+            )}
+            {comeback && (
+              <span className="text-xs font-semibold text-caution bg-caution/10 border border-caution/25 rounded px-1.5 py-0.5">
+                {Math.round(comeback.factor * 100)}% · coming back {comeback.comebackSessionsDone + 1}/{comeback.comebackSessionsTotal}
+              </span>
             )}
             {progressed && (
               <span className="text-xs font-semibold text-positive bg-positive/10 border border-positive/25 rounded px-1.5 py-0.5 flex items-center gap-1">
@@ -254,29 +244,17 @@ export default function WorkoutPreviewScreen() {
 
   async function load(id: string) {
     try {
-      const program   = await getActiveProgram()
-      const templates = await getWorkoutTemplates(program?.id ?? '')
-      const template  = templates.find(t => t.id === id) ?? templates[0]
-      // Alternate-only exercises only appear when swapped in mid-workout
-      const exercises = (await getExerciseTemplates(id)).filter(e => !e.is_alternate_only)
-
-      const recentSessions = await getRecentCompletedSessionsForTemplate(id, 10)
-      const comeback        = detectComeback(recentSessions)
-
-      // Weight calculation walks recent sessions per exercise (benchmark
-      // first during a comeback); "prev" display uses the newest session only.
-      const refSessionIds = orderReferenceSessionIds(recentSessions, comeback)
-      const allRefLogs = await getSetLogsForSessions(refSessionIds)
-      const logsBySession = refSessionIds.map(id => allRefLogs.filter(l => l.session_id === id))
-      const effectiveLogs = buildEffectiveLastLogs(exercises, logsBySession)
-      const lastSetLogs = recentSessions[0]
-        ? allRefLogs.filter(l => l.session_id === recentSessions[0].id)
-        : []
+      const template = await getWorkoutTemplate(id)
+      if (!template) throw new Error('Workout not found')
+      const plan = await planSession(id)
 
       // Compute what the session would look like — no DB write
-      const sets = initializeSession(exercises, effectiveLogs, comeback?.factor)
+      const sets = initializeSession(plan.exercises, plan.refLogs, plan.factors)
 
-      setData({ template, exercises, sets, lastSetLogs, refLogs: effectiveLogs, comeback })
+      setData({
+        template, exercises: plan.exercises, sets,
+        lastSetLogs: plan.lastLogs, refLogs: plan.refLogs, comebacks: plan.comebacks,
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load preview')
     }
@@ -302,7 +280,8 @@ export default function WorkoutPreviewScreen() {
     </div>
   )
 
-  const { template, exercises, sets, lastSetLogs, refLogs, comeback } = data
+  const { template, exercises, sets, lastSetLogs, refLogs, comebacks } = data
+  const comebackSummary = summarizeComebacks(comebacks, exercises.map(e => e.id))
 
   // Group sets by exercise in exercise order
   const exerciseGroups = exercises.map(ex => ({
@@ -367,7 +346,7 @@ export default function WorkoutPreviewScreen() {
         </div>
 
         {/* Comeback banner */}
-        {comeback && <ComebackBadge info={comeback} />}
+        {comebackSummary && <ComebackBadge summary={comebackSummary} />}
 
         {/* Warmup notes */}
         {template.warmup_text && (
@@ -384,6 +363,7 @@ export default function WorkoutPreviewScreen() {
                 sets={group.sets}
                 lastSetLogs={lastSetLogs}
                 refLogs={refLogs}
+                comeback={comebacks[group.exercise.id]}
               />
             )
           }
@@ -403,6 +383,7 @@ export default function WorkoutPreviewScreen() {
                     sets={item.sets}
                     lastSetLogs={lastSetLogs}
                     refLogs={refLogs}
+                    comeback={comebacks[item.exercise.id]}
                   />
                 ))}
               </div>
