@@ -16,7 +16,7 @@ import {
 } from '../lib/db'
 import { barWeightForType, calcBackoffWeight, calcStaleness, calcWarmupWeight, calcDumbbellWarmup, initializeSession } from '../lib/calculations'
 import type { ComebackInfo } from '../lib/calculations'
-import { planSession, summarizeComebacks, type ComebackSummary } from '../lib/sessionPlan'
+import { describeComebackLifts, planSession, summarizeComebacks, type ComebackSummary } from '../lib/sessionPlan'
 import type { ExerciseTemplate, Session, SetLog, WorkoutTemplate } from '../types'
 import RestTimer from '../components/RestTimer'
 
@@ -656,15 +656,15 @@ function CollapsibleBlock({ title, text }: { title: string; text: string }) {
 // ─── Comeback banner ──────────────────────────────────────────────────────────
 
 function ComebackBanner({ summary, onDismiss }: { summary: ComebackSummary; onDismiss: () => void }) {
-  const lifts = summary.count === 1 ? '1 lift' : `${summary.count} lifts`
   return (
     <div className="bg-caution/10 border border-caution/30 rounded-2xl p-4 flex items-start justify-between gap-3">
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-caution">
-          Coming back · up to {summary.gapDays} days off
+          Back from a {summary.gapDays}-day break
         </p>
         <p className="text-xs text-ink-secondary mt-0.5">
-          {lifts} at reduced weight, ramping back to full over the next few times you do {summary.count === 1 ? 'it' : 'them'}.
+          Ramping back up: {describeComebackLifts(summary)}. Full weight returns after a
+          few sessions, or as soon as you match your pre-break weight.
         </p>
       </div>
       <button
@@ -1079,7 +1079,7 @@ export default function WorkoutScreen() {
   }
 
   const { template, exercises, setLogs } = data
-  const comebackSummary = summarizeComebacks(data.comebacks, exercises.map(e => e.id))
+  const comebackSummary = summarizeComebacks(data.comebacks, exercises)
 
   const allWorkingSetsComplete = setLogs
     .filter(l => !skipped.has(l.exercise_template_id) && (l.set_type === 'top' || l.set_type === 'working' || l.set_type === 'backoff'))

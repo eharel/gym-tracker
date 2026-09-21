@@ -5,7 +5,7 @@ import { barWeightForType } from '../lib/calculations'
 import { getWorkoutTemplate } from '../lib/db'
 import { initializeSession } from '../lib/calculations'
 import type { ComebackInfo } from '../lib/calculations'
-import { planSession, summarizeComebacks, type ComebackSummary } from '../lib/sessionPlan'
+import { describeComebackLifts, planSession, summarizeComebacks, type ComebackSummary } from '../lib/sessionPlan'
 import type { ExerciseTemplate, NewSetLog, SetLog, WorkoutTemplate } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -49,14 +49,13 @@ function setTypeMeta(type: NewSetLog['set_type']): SetTypeMeta {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ComebackBadge({ summary }: { summary: ComebackSummary }) {
-  const lifts = summary.count === 1 ? '1 lift' : `${summary.count} lifts`
   return (
     <div className="bg-caution/10 border border-caution/30 rounded-2xl p-4">
       <p className="text-sm font-semibold text-caution">
-        Comeback · up to {summary.gapDays} days off
+        Back from a {summary.gapDays}-day break
       </p>
       <p className="text-xs text-ink-secondary mt-0.5">
-        {lifts} at reduced weight, ramping back to full.
+        Ramping back up: {describeComebackLifts(summary)}.
       </p>
     </div>
   )
@@ -281,7 +280,7 @@ export default function WorkoutPreviewScreen() {
   )
 
   const { template, exercises, sets, lastSetLogs, refLogs, comebacks } = data
-  const comebackSummary = summarizeComebacks(comebacks, exercises.map(e => e.id))
+  const comebackSummary = summarizeComebacks(comebacks, exercises)
 
   // Group sets by exercise in exercise order
   const exerciseGroups = exercises.map(ex => ({

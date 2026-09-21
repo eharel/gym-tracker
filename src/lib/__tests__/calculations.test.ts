@@ -5,7 +5,7 @@ import {
   calcDumbbellWarmup,
   calcStaleness,
   calcWarmupWeight,
-  detectComeback,
+  detectLayoff,
   getNextWorkoutTemplate,
   hasEarnedProgression,
   initializeSession,
@@ -269,83 +269,37 @@ describe('getNextWorkoutTemplate', () => {
   })
 })
 
-// ─── detectComeback ──────────────────────────────────────────────────────────
+// ─── detectLayoff ─────────────────────────────────────────────────────────────
 
-describe('detectComeback', () => {
+describe('detectLayoff', () => {
   const NOW = new Date('2026-06-01T12:00:00Z')
+  const sess = (id: string, startDaysAgo: number, doneDaysAgo = startDaysAgo) =>
+    makeSession({ id, started_at: daysAgo(startDaysAgo, NOW), completed_at: daysAgo(doneDaysAgo, NOW) })
 
   it('returns null with no sessions', () => {
-    expect(detectComeback([], NOW)).toBeNull()
+    expect(detectLayoff([], NOW)).toBeNull()
   })
 
-  it('returns null when last session was recent (under 14 days)', () => {
-    const sessions = [makeSession({ completed_at: daysAgo(5, NOW) })]
-    expect(detectComeback(sessions, NOW)).toBeNull()
+  it('returns null when training has been continuous', () => {
+    expect(detectLayoff([sess('a', 2), sess('b', 9), sess('c', 20)], NOW)).toBeNull()
   })
 
-  it('detects a gap right at the 14-day threshold', () => {
-    const sessions = [makeSession({ id: 'bench', completed_at: daysAgo(14, NOW) })]
-    expect(detectComeback(sessions, NOW)).not.toBeNull()
+  it('detects an ongoing layoff right at the 14-day threshold', () => {
+    const l = detectLayoff([sess('a', 14)], NOW)!
+    expect(l.endedAt).toBeNull()
+    expect(l.gapDays).toBeCloseTo(14)
   })
 
-  it('returns correct info for a 20-day gap (total=2, 85% start)', () => {
-    const sessions = [makeSession({ id: 'bench', completed_at: daysAgo(20, NOW) })]
-    const result = detectComeback(sessions, NOW)!
-    expect(result.benchmarkSessionId).toBe('bench')
-    expect(result.comebackSessionsDone).toBe(0)
-    expect(result.comebackSessionsTotal).toBe(2)
-    expect(result.factor).toBeCloseTo(0.85)
-    expect(result.sessionsRemaining).toBe(2)
+  it('detects a past layoff between two sessions', () => {
+    const l = detectLayoff([sess('back', 5), sess('before', 30)], NOW)!
+    expect(l.startedAt).toBe(daysAgo(30, NOW))
+    expect(l.endedAt).toBe(daysAgo(5, NOW))
+    expect(l.gapDays).toBeCloseTo(25)
   })
 
-  it('returns correct info for a 35-day gap (total=3, 75% start)', () => {
-    // 35 days is in the [21, 42) band → total=3, startFactor=0.75
-    const sessions = [makeSession({ id: 'bench', completed_at: daysAgo(35, NOW) })]
-    const result = detectComeback(sessions, NOW)!
-    expect(result.comebackSessionsTotal).toBe(3)
-    expect(result.factor).toBeCloseTo(0.75)
-  })
-
-  it('returns correct info for a 45-day gap (total=4, 65% start)', () => {
-    // 45 days is in the [42, 84) band → total=4, startFactor=0.65
-    const sessions = [makeSession({ id: 'bench', completed_at: daysAgo(45, NOW) })]
-    const result = detectComeback(sessions, NOW)!
-    expect(result.comebackSessionsTotal).toBe(4)
-    expect(result.factor).toBeCloseTo(0.65)
-  })
-
-  it('returns correct info for a 90-day gap (total=4, 60% start)', () => {
-    // 90 days is in the [84, ∞) band → total=4, startFactor=0.60
-    const sessions = [makeSession({ id: 'bench', completed_at: daysAgo(90, NOW) })]
-    const result = detectComeback(sessions, NOW)!
-    expect(result.comebackSessionsTotal).toBe(4)
-    expect(result.factor).toBeCloseTo(0.60)
-  })
-
-  it('detects an in-progress comeback (1 of 2 done → factor = 1.0)', () => {
-    // sessions[0] started 5 days ago; sessions[1] completed 25 days ago → 20-day gap
-    // comebackParams(20) → total=2, startFactor=0.85
-    // comebackFactor(20, done=1) → 0.85 + 0.15*(1/1) = 1.0
-    const sessions = [
-      makeSession({ id: 'post', started_at: daysAgo(5, NOW), completed_at: daysAgo(5, NOW) }),
-      makeSession({ id: 'bench', started_at: daysAgo(25, NOW), completed_at: daysAgo(25, NOW) }),
-    ]
-    const result = detectComeback(sessions, NOW)!
-    expect(result).not.toBeNull()
-    expect(result.benchmarkSessionId).toBe('bench')
-    expect(result.comebackSessionsDone).toBe(1)
-    expect(result.comebackSessionsTotal).toBe(2)
-    expect(result.factor).toBeCloseTo(1.0)
-  })
-
-  it('returns null when the comeback is already complete (done >= total)', () => {
-    // 20-day gap → total=2; 2 post-gap sessions = done=2, comeback over
-    const sessions = [
-      makeSession({ id: 'post2', started_at: daysAgo(3, NOW), completed_at: daysAgo(3, NOW) }),
-      makeSession({ id: 'post1', started_at: daysAgo(5, NOW), completed_at: daysAgo(5, NOW) }),
-      makeSession({ id: 'bench', completed_at: daysAgo(25, NOW) }),
-    ]
-    expect(detectComeback(sessions, NOW)).toBeNull()
+  it('returns the most recent layoff when there are several', () => {
+    const l = detectLayoff([sess('a', 2), sess('b', 20), sess('c', 60), sess('d', 100)], NOW)!
+    expect(l.gapDays).toBeCloseTo(18)  // b → a, not c → b
   })
 })
 
@@ -530,6 +484,12 @@ describe('initializeSession', () => {
 describe('planFromHistory', () => {
   const NOW = new Date('2026-09-21T12:00:00Z')
   const day = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString()
+  /** A layoff that began `from` days ago and ended `to` days ago (null = ongoing). */
+  const layoff = (from: number, to: number | null) => ({
+    startedAt: day(from),
+    endedAt: to === null ? null : day(to),
+    gapDays: from - (to ?? 0),
+  })
 
   /** A completed working-set log in a session `daysAgo` days old. */
   function hlog(opts: {
@@ -563,7 +523,7 @@ describe('planFromHistory', () => {
     const plan = planFromHistory([ex], [
       hlog({ session: 'new', exercise: 'ohp', daysAgo: 3, weight: 95 }),
       hlog({ session: 'old', exercise: 'ohp', daysAgo: 10, weight: 90 }),
-    ], same, NOW)
+    ], same, null)
     expect(plan.refLogs.map(l => l.actual_weight)).toEqual([95])
     expect(plan.lastLogs.every(l => l.exercise_template_id === 'ohp')).toBe(true)
     expect(plan.comebacks).toEqual({})
@@ -574,18 +534,17 @@ describe('planFromHistory', () => {
     const plan = planFromHistory([ex], [
       hlog({ session: 'skipped', exercise: 'ohp', daysAgo: 3, weight: null, completed: false }),
       hlog({ session: 'done', exercise: 'ohp', daysAgo: 10, weight: 90 }),
-    ], same, NOW)
+    ], same, null)
     expect(plan.refLogs.map(l => l.actual_weight)).toEqual([90])
     expect(plan.lastLogs.map(l => l.actual_weight)).toEqual([90])
   })
 
   it('pulls history from another program\'s copy of the same movement', () => {
-    // Weekly-program squat is a copy of the A/B squat
     const weeklySquat = makeEx({ id: 'weekly-squat', movement_id: 'ab-squat' })
     const movementOf = (id: string) => (id === 'weekly-squat' || id === 'ab-squat' ? 'ab-squat' : id)
     const plan = planFromHistory([weeklySquat], [
       hlog({ session: 's1', exercise: 'ab-squat', daysAgo: 5, weight: 290, reps: 2 }),
-    ], movementOf, NOW)
+    ], movementOf, null)
     expect(plan.refLogs).toHaveLength(1)
     expect(plan.refLogs[0].exercise_template_id).toBe('weekly-squat')
     expect(plan.refLogs[0].actual_weight).toBe(290)
@@ -597,70 +556,101 @@ describe('planFromHistory', () => {
     const plan = planFromHistory([squat, rdl], [
       hlog({ session: 's1', exercise: 'squat', daysAgo: 5, weight: 290 }),
       hlog({ session: 's1', exercise: 'rdl', daysAgo: 5, weight: 185 }),
-    ], same, NOW)
+    ], same, null)
     expect(plan.refLogs.find(l => l.exercise_template_id === 'squat')?.actual_weight).toBe(290)
     expect(plan.refLogs.find(l => l.exercise_template_id === 'rdl')?.actual_weight).toBe(185)
   })
 
-  it('puts only the lift with a long layoff into a comeback', () => {
-    const squat = makeEx({ id: 'squat' })   // trained 5 days ago
-    const ohp = makeEx({ id: 'ohp' })       // untouched for 30 days
-    const plan = planFromHistory([squat, ohp], [
-      hlog({ session: 's1', exercise: 'squat', daysAgo: 5, weight: 290 }),
-      hlog({ session: 's0', exercise: 'ohp', daysAgo: 30, weight: 110 }),
-    ], same, NOW)
-    expect(plan.comebacks.squat).toBeUndefined()
-    expect(plan.comebacks.ohp?.gapDays).toBe(30)
-    expect(plan.comebacks.ohp?.factor).toBe(0.75)
+  it('does not ramp a lift that was only rotated out while training continued', () => {
+    const ohp = makeEx({ id: 'ohp' })  // untouched for 44 days, but no layoff
+    const plan = planFromHistory([ohp], [
+      hlog({ session: 's0', exercise: 'ohp', daysAgo: 44, weight: 110 }),
+    ], same, null)
+    expect(plan.comebacks).toEqual({})
+    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([110])
   })
 
-  it('builds a comeback from the pre-gap benchmark, not the ramp session', () => {
+  it('ramps every lift during an ongoing layoff, from its last weight', () => {
+    const squat = makeEx({ id: 'squat' })
+    const plan = planFromHistory([squat], [
+      hlog({ session: 's0', exercise: 'squat', daysAgo: 30, weight: 290 }),
+    ], same, layoff(30, null))
+    expect(plan.comebacks.squat?.comebackSessionsDone).toBe(0)
+    expect(plan.comebacks.squat?.factor).toBeCloseTo(0.75)
+  })
+
+  it.each([
+    [20, 2, 0.85],
+    [35, 3, 0.75],
+    [45, 4, 0.65],
+    [90, 4, 0.60],
+  ])('a %i-day break ramps over %i sessions from %d', (gap, total, start) => {
     const ex = makeEx({ id: 'squat' })
-    // Benchmark 40 days ago, a 35-day gap, then one comeback session 5 days ago
     const plan = planFromHistory([ex], [
-      hlog({ session: 'ramp1', exercise: 'squat', daysAgo: 5, weight: 220 }),
-      hlog({ session: 'bench', exercise: 'squat', daysAgo: 40, weight: 290 }),
-    ], same, NOW)
-    expect(plan.comebacks.squat?.comebackSessionsDone).toBe(1)
-    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([290])       // weights from benchmark
-    expect(plan.lastLogs.map(l => l.actual_weight)).toEqual([220])      // deltas vs last time
+      hlog({ session: 's0', exercise: 'squat', daysAgo: gap, weight: 290 }),
+    ], same, layoff(gap, null))
+    expect(plan.comebacks.squat?.comebackSessionsTotal).toBe(total)
+    expect(plan.comebacks.squat?.factor).toBeCloseTo(start)
   })
 
-  it('ends a comeback early once a session since the gap matched the benchmark', () => {
+  it('counts each lift\'s own appearances since the layoff', () => {
     const ex = makeEx({ id: 'bench' })
-    // 235 before a 25-day layoff, then came straight back at 240
+    // 35-day break (3-session ramp); one bench session since, still below 290
+    const plan = planFromHistory([ex], [
+      hlog({ session: 'back', exercise: 'bench', daysAgo: 5, weight: 220 }),
+      hlog({ session: 'pre', exercise: 'bench', daysAgo: 40, weight: 290 }),
+    ], same, layoff(40, 5))
+    expect(plan.comebacks.bench?.comebackSessionsDone).toBe(1)
+    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([290])   // weights from pre-break
+    expect(plan.lastLogs.map(l => l.actual_weight)).toEqual([220])  // deltas vs last time
+  })
+
+  it('ramps a lift not yet done since a past layoff from its first appearance', () => {
+    const ohp = makeEx({ id: 'ohp' })
+    const plan = planFromHistory([ohp], [
+      hlog({ session: 'pre', exercise: 'ohp', daysAgo: 40, weight: 100 }),
+    ], same, layoff(40, 5))
+    expect(plan.comebacks.ohp?.comebackSessionsDone).toBe(0)
+  })
+
+  it('ends a comeback early once a session since the break matched the benchmark', () => {
+    const ex = makeEx({ id: 'bench' })
     const plan = planFromHistory([ex], [
       hlog({ session: 'back', exercise: 'bench', daysAgo: 5, weight: 240 }),
       hlog({ session: 'pre', exercise: 'bench', daysAgo: 30, weight: 235 }),
-    ], same, NOW)
+    ], same, layoff(30, 5))
     expect(plan.comebacks.bench).toBeUndefined()
-    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([240])  // builds from the recent session
+    expect(plan.refLogs.map(l => l.actual_weight)).toEqual([240])
   })
 
-  it('keeps ramping while sessions since the gap stay below the benchmark', () => {
+  it('ends a comeback once the lift has had its full ramp', () => {
     const ex = makeEx({ id: 'bench' })
+    // 20-day break → 2-session ramp, both done (below benchmark, but ramp over)
     const plan = planFromHistory([ex], [
-      hlog({ session: 'back', exercise: 'bench', daysAgo: 5, weight: 205 }),
-      hlog({ session: 'pre', exercise: 'bench', daysAgo: 30, weight: 235 }),
-    ], same, NOW)
-    expect(plan.comebacks.bench?.comebackSessionsDone).toBe(1)
+      hlog({ session: 'r2', exercise: 'bench', daysAgo: 2, weight: 225 }),
+      hlog({ session: 'r1', exercise: 'bench', daysAgo: 5, weight: 205 }),
+      hlog({ session: 'pre', exercise: 'bench', daysAgo: 25, weight: 235 }),
+    ], same, layoff(25, 5))
+    expect(plan.comebacks.bench).toBeUndefined()
   })
 
   it('falls back to newest logs when never performed (rep prefill parity)', () => {
     const ex = makeEx({ id: 'ohp' })
     const plan = planFromHistory([ex], [
       hlog({ session: 's1', exercise: 'ohp', daysAgo: 3, weight: null, reps: 6, completed: false }),
-    ], same, NOW)
+    ], same, null)
     expect(plan.lastLogs.map(l => l.actual_reps)).toEqual([6])
   })
 
   it('drives initializeSession with per-exercise comeback factors', () => {
     const squat = makeEx({ id: 'squat' })
     const ohp = makeEx({ id: 'ohp' })
+    // 25-day break; squat already back at full, OHP not done since
     const plan = planFromHistory([squat, ohp], [
-      hlog({ session: 's1', exercise: 'squat', daysAgo: 5, weight: 290, reps: 2 }),
-      hlog({ session: 's0', exercise: 'ohp', daysAgo: 30, weight: 100, reps: 4 }),
-    ], same, NOW)
+      hlog({ session: 'back', exercise: 'squat', daysAgo: 5, weight: 290, reps: 2 }),
+      hlog({ session: 'pre', exercise: 'squat', daysAgo: 30, weight: 290, reps: 2 }),
+      hlog({ session: 'pre', exercise: 'ohp', daysAgo: 30, weight: 100, reps: 4 }),
+    ], same, layoff(30, 5))
     const factors = Object.fromEntries(Object.entries(plan.comebacks).map(([id, c]) => [id, c.factor]))
     const sets = initializeSession([squat, ohp], plan.refLogs, factors)
     expect(sets.find(s => s.exercise_template_id === 'squat')?.target_weight).toBe(290) // full

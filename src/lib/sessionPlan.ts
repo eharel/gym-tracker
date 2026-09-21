@@ -1,5 +1,5 @@
-import { getExerciseTemplates, getMovementHistory } from './db'
-import { planFromHistory, type ComebackInfo } from './calculations'
+import { getExerciseTemplates, getMovementHistory, getProfileCompletedSessions } from './db'
+import { detectLayoff, planFromHistory, type ComebackInfo } from './calculations'
 import type { ExerciseTemplate, SetLog } from '../types'
 
 export interface SessionPlan {
@@ -21,9 +21,10 @@ export interface SessionPlan {
  * Everything a workout needs to set itself up, built from each exercise's
  * movement history rather than the workout's own past sessions — so moving
  * a lift to another day or program keeps its weights, deltas and comeback.
+ * Comebacks come from a layoff in the person's whole training history.
  *
  * @param excludeSessionId  leave out a session in progress (resuming it)
- * @param now               reference time for comeback detection; pass the
+ * @param now               reference time for layoff detection; pass the
  *                          session's start when resuming so the state matches
  *                          what it was initialized with
  */
@@ -33,10 +34,15 @@ export async function planSession(
 ): Promise<SessionPlan> {
   const allExercises = await getExerciseTemplates(workoutTemplateId)
   const exercises = allExercises.filter(e => !e.is_alternate_only)
-  const { logs, movementOf } = await getMovementHistory(allExercises, {
-    excludeSessionId: opts.excludeSessionId,
-  })
-  const { refLogs, lastLogs, comebacks } = planFromHistory(allExercises, logs, movementOf, opts.now)
+  const [{ logs, movementOf }, sessions] = await Promise.all([
+    getMovementHistory(allExercises, { excludeSessionId: opts.excludeSessionId }),
+    getProfileCompletedSessions(),
+  ])
+  const layoff = detectLayoff(
+    sessions.filter(s => s.id !== opts.excludeSessionId),
+    opts.now,
+  )
+  const { refLogs, lastLogs, comebacks } = planFromHistory(allExercises, logs, movementOf, layoff)
   const factors = Object.fromEntries(
     Object.entries(comebacks).map(([id, c]) => [id, c.factor]),
   )
@@ -44,21 +50,30 @@ export async function planSession(
 }
 
 export interface ComebackSummary {
-  /** Longest layoff among the exercises that are ramping back up. */
+  /** Length of the break being recovered from. */
   gapDays: number
-  /** How many of them are. */
-  count: number
+  /** The lifts still ramping, with the percentage each is at. */
+  lifts: { name: string; percent: number }[]
 }
 
 /** Banner summary for the given exercises; null when none is in a comeback. */
 export function summarizeComebacks(
   comebacks: Record<string, ComebackInfo>,
-  exerciseIds: string[],
+  exercises: ExerciseTemplate[],
 ): ComebackSummary | null {
-  const active = exerciseIds.map(id => comebacks[id]).filter((c): c is ComebackInfo => c != null)
-  if (active.length === 0) return null
+  const lifts = exercises
+    .filter(e => comebacks[e.id])
+    .map(e => ({ name: e.name, percent: Math.round(comebacks[e.id].factor * 100) }))
+  if (lifts.length === 0) return null
   return {
-    gapDays: Math.max(...active.map(c => c.gapDays)),
-    count: active.length,
+    gapDays: Math.max(...exercises.filter(e => comebacks[e.id]).map(e => comebacks[e.id].gapDays)),
+    lifts,
   }
+}
+
+/** "Squat 75%, Bench 75%, RDL 75% +2 more" — names the lifts, briefly. */
+export function describeComebackLifts(summary: ComebackSummary): string {
+  const shown = summary.lifts.slice(0, 3).map(l => `${l.name} ${l.percent}%`).join(', ')
+  const more = summary.lifts.length - 3
+  return more > 0 ? `${shown} +${more} more` : shown
 }

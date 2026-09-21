@@ -54,55 +54,39 @@ function comebackFactor(gapDays: number, sessionsDone: number): number {
   return startFactor + (1 - startFactor) * t
 }
 
+const LAYOFF_DAYS = 14
+
+/** A break from training altogether — no completed session of any workout. */
+export interface Layoff {
+  /** When training stopped: the last session before the gap completed. */
+  startedAt: string
+  /** When it resumed: the first session after the gap started; null = still off. */
+  endedAt: string | null
+  gapDays: number
+}
+
 /**
- * Scans recent *completed* sessions (newest-first) to determine whether the
- * next session should be a comeback session.
+ * Finds the most recent layoff (a gap of 14+ days) in a person's training,
+ * including an ongoing one up to `now`. Comebacks key off this, not off how
+ * long a single lift has sat out — rotating a lift out while still training
+ * doesn't detrain you.
  *
- * @param sessions  Completed sessions for this workout template, newest-first.
- * @param now       Treated as "start of the new session" (injectable for tests).
+ * @param sessions  Completed sessions across every workout, newest-first.
  */
-export function detectComeback(
-  sessions: Session[],
-  now: Date = new Date(),
-): ComebackInfo | null {
-  if (sessions.length === 0) return null
+export function detectLayoff(sessions: Session[], now: Date = new Date()): Layoff | null {
+  const done = sessions.filter(s => s.completed_at)
+  if (done.length === 0) return null
 
-  const GAP_THRESHOLD = 14 // days
-
-  // ── Case 1: gap is between the last session and right now ──────────────────
-  const daysSinceLast = daysBetween(sessions[0].completed_at!, now)
-  if (daysSinceLast >= GAP_THRESHOLD) {
-    const { total, startFactor } = comebackParams(daysSinceLast)
-    return {
-      benchmarkSessionId:    sessions[0].id,
-      gapDays:               Math.round(daysSinceLast),
-      comebackSessionsDone:  0,
-      comebackSessionsTotal: total,
-      factor:                startFactor,
-      sessionsRemaining:     total,
+  const sinceLast = daysBetween(done[0].completed_at!, now)
+  if (sinceLast >= LAYOFF_DAYS) {
+    return { startedAt: done[0].completed_at!, endedAt: null, gapDays: sinceLast }
+  }
+  for (let i = 1; i < done.length; i++) {
+    const gap = daysBetween(done[i].completed_at!, done[i - 1].started_at)
+    if (gap >= LAYOFF_DAYS) {
+      return { startedAt: done[i].completed_at!, endedAt: done[i - 1].started_at, gapDays: gap }
     }
   }
-
-  // ── Case 2: we're in the middle of a comeback ──────────────────────────────
-  // sessions[i-1] is a post-gap session; sessions[i] is the benchmark.
-  for (let i = 1; i < sessions.length; i++) {
-    const gap = daysBetween(sessions[i].completed_at!, sessions[i - 1].started_at)
-    if (gap >= GAP_THRESHOLD) {
-      const done = i // i sessions completed since the gap
-      const { total } = comebackParams(gap)
-      if (done >= total) return null // comeback already complete
-      const factor = comebackFactor(gap, done)
-      return {
-        benchmarkSessionId:    sessions[i].id,
-        gapDays:               Math.round(gap),
-        comebackSessionsDone:  done,
-        comebackSessionsTotal: total,
-        factor,
-        sessionsRemaining:     total - done,
-      }
-    }
-  }
-
   return null
 }
 
@@ -327,8 +311,9 @@ function mainSetWeight(logs: SetLog[]): number | null {
  * history of its movement rather than the workout it happens to sit in.
  *
  * Per exercise: the last session that actually *performed* the movement
- * (skips don't count) supplies the weights; a 14+ day gap in that
- * movement's own history triggers a comeback ramp for that exercise alone.
+ * (skips don't count) supplies the weights. After a layoff (see
+ * detectLayoff), each exercise ramps back from its pre-layoff weight over
+ * its own next appearances.
  * Logs are remapped onto the exercise's own id so initializeSession and the
  * set rows can match them directly.
  *
@@ -338,7 +323,7 @@ export function planFromHistory(
   exercises: ExerciseTemplate[],
   logs: HistoryLog[],
   movementOf: (exerciseTemplateId: string) => string,
-  now: Date = new Date(),
+  layoff: Layoff | null,
 ): ExercisePlan {
   const refLogs: SetLog[] = []
   const lastLogs: SetLog[] = []
@@ -372,28 +357,33 @@ export function planFromHistory(
     const last = performed[0] ?? sessions[0]
     if (last) lastLogs.push(...remap(last.logs))
 
-    const comeback = detectComeback(
-      performed.map(s => ({
-        id: s.id,
-        profile_id: '',
-        workout_template_id: '',
-        started_at: s.startedAt,
-        completed_at: s.completedAt,
-        notes: null,
-      })),
-      now,
-    )
-    // A comeback exists to protect against lost strength. Once a session
-    // since the layoff has matched the pre-gap weight, the ramp is moot —
-    // otherwise someone who returns at full strength gets held back anyway.
-    let active = comeback
-    if (comeback) {
-      const benchIdx = performed.findIndex(s => s.id === comeback.benchmarkSessionId)
-      const benchWeight = benchIdx >= 0 ? mainSetWeight(performed[benchIdx].logs) : null
-      const recovered = benchWeight !== null && performed
-        .slice(0, benchIdx)   // sessions since the gap, newest-first
-        .some(s => (mainSetWeight(s.logs) ?? -Infinity) >= benchWeight)
-      if (recovered) active = null
+    // After a layoff, each lift ramps from its last pre-layoff performance
+    // over its own next few appearances. A lift that already matched that
+    // weight since coming back is done ramping — returning at full strength
+    // shouldn't be held back.
+    let active: ComebackInfo | null = null
+    if (layoff) {
+      const t = (iso: string) => new Date(iso).getTime()
+      const benchmark = performed.find(s => t(s.completedAt) <= t(layoff.startedAt))
+      const since = layoff.endedAt
+        ? performed.filter(s => t(s.startedAt) >= t(layoff.endedAt!))
+        : []
+      if (benchmark) {
+        const { total } = comebackParams(layoff.gapDays)
+        const benchWeight = mainSetWeight(benchmark.logs)
+        const recovered = benchWeight !== null &&
+          since.some(s => (mainSetWeight(s.logs) ?? -Infinity) >= benchWeight)
+        if (since.length < total && !recovered) {
+          active = {
+            benchmarkSessionId: benchmark.id,
+            gapDays: Math.round(layoff.gapDays),
+            comebackSessionsDone: since.length,
+            comebackSessionsTotal: total,
+            factor: comebackFactor(layoff.gapDays, since.length),
+            sessionsRemaining: total - since.length,
+          }
+        }
+      }
     }
 
     if (active) {
