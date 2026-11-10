@@ -97,7 +97,7 @@ export default function RestTimer({ startSignal = 0 }: { startSignal?: number })
   const isLow = isRunning && remaining !== null && remaining <= 10
 
   return (
-    <div className="fixed bottom-8 right-4 flex flex-col items-end gap-2 z-50 select-none">
+    <div className="fixed bottom-[calc(2rem+env(safe-area-inset-bottom))] right-[calc(1rem+env(safe-area-inset-right))] flex flex-col items-end gap-2 z-50 select-none">
 
       {/* Preset picker — floats upward */}
       {showPicker && (

@@ -75,11 +75,37 @@
     background: radial-gradient(ellipse 120% 50% at 50% 0%, var(--color-glow) 0%, var(--color-canvas) 65%);
   }
 
+  /* ─── iOS safe areas ─────────────────────────────────────
+     index.html sets viewport-fit=cover with a black-translucent
+     status bar, so the web view runs edge to edge: its top is
+     UNDER the Dynamic Island / status bar and its bottom is under
+     the home indicator. Padding #root insets the content back out
+     of both, while body keeps painting the gradient edge to edge.
+     Position-fixed elements are NOT inside this padding box (they
+     anchor to the viewport), so each one adds the inset itself.   */
+  #root {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
   input,
   select,
   textarea {
     font-size: 1rem;
   }
+}
+
+/* ─── Screen height, inset-aware ──────────────────────────────────────────────
+   Every screen root uses min-h-screen. Tailwind resolves that to 100vh — the
+   FULL screen, including the safe areas that #root above pads away. Left as-is
+   each screen would be taller than its box and scroll by the height of the two
+   insets (~93px on a Dynamic Island phone) even with nothing to scroll to.
+   This rule sits outside @layer on purpose: unlayered styles outrank layered
+   ones, so it reliably replaces the utility without !important.             */
+.min-h-screen {
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
 
 /* ─── Themes ──────────────────────────────────────────────────────────────────
